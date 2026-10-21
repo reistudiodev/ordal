@@ -1,0 +1,4 @@
+[bindings.swift]
+module_name = "DBClientCore"
+ffi_module_name = "DBClientCoreFFI"
+ffi_module_filename = "DBClientCoreFFI"

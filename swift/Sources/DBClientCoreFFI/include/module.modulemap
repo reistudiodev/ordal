@@ -1,0 +1,4 @@
+module DBClientCoreFFI {
+    header "DBClientCoreFFI.h"
+    export *
+}

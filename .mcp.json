@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "/Users/reizhafajrian/.nvm/versions/node/v22.19.0/lib/node_modules/@reizhafajrian/code-review-graph/.venv/bin/python3",
+      "args": [
+        "-m",
+        "code_review_graph",
+        "serve"
+      ],
+      "cwd": "/Users/reizhafajrian/Downloads/dbclient",
+      "type": "stdio"
+    }
+  }
+}

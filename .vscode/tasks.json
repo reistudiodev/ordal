@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Rust core + bindings",
+      "type": "shell",
+      "command": "./scripts/build-core.sh --debug",
+      "windows": { "command": "powershell -ExecutionPolicy Bypass -File scripts/build-core.ps1 -Debug" },
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "Test Rust core",
+      "type": "shell",
+      "command": "cargo test",
+      "problemMatcher": ["$rustc"],
+      "group": "test"
+    },
+    {
+      "label": "Build app",
+      "type": "shell",
+      "dependsOn": "Build Rust core + bindings",
+      "osx": { "command": "swift build", "options": { "cwd": "${workspaceFolder}/apps/macos" } },
+      "linux": { "command": "swift build", "options": { "cwd": "${workspaceFolder}/apps/linux" } },
+      "windows": { "command": "swift build", "options": { "cwd": "${workspaceFolder}/apps/windows" } },
+      "problemMatcher": ["$swiftc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "Run app",
+      "type": "shell",
+      "dependsOn": "Build Rust core + bindings",
+      "osx": { "command": "swift run", "options": { "cwd": "${workspaceFolder}/apps/macos" } },
+      "linux": { "command": "swift run", "options": { "cwd": "${workspaceFolder}/apps/linux" } },
+      "windows": { "command": "swift run", "options": { "cwd": "${workspaceFolder}/apps/windows" } },
+      "problemMatcher": []
+    },
+    {
+      "label": "Package macOS .app",
+      "type": "shell",
+      "command": "./scripts/package-macos.sh",
+      "problemMatcher": []
+    }
+  ]
+}

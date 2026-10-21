@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            app: macos
+          - os: ubuntu-latest
+            app: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust tests
+        run: cargo test
+      - name: Build core and bindings
+        run: ./scripts/build-core.sh
+      - name: Swift tests
+        run: swift test
+        working-directory: swift
+      - name: Build app
+        run: swift build
+        working-directory: apps/${{ matrix.app }}
+
+  # Swift on Windows isn't preinstalled on runners; this checks the Rust side for now.
+  windows-core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test

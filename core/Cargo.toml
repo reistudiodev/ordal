@@ -1,0 +1,17 @@
+[package]
+name = "dbclient-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-independent logic for the database client (the \"brain\")."
+
+[lib]
+# lib: used by Rust tests and the bindgen
+# staticlib: linked into the Swift apps on every platform
+# cdylib: needed by uniffi-bindgen to read the interface metadata
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "dbclient_core"
+
+[dependencies]
+uniffi.workspace = true
+thiserror.workspace = true

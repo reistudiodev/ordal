@@ -1,0 +1,12 @@
+{
+  "rust-analyzer.linkedProjects": ["Cargo.toml"],
+  "rust-analyzer.check.command": "clippy",
+  "swift.searchSubfoldersForPackages": true,
+  "swift.autoGenerateLaunchConfigurations": false,
+  "files.exclude": {
+    "**/.build": true,
+    "target": true
+  },
+  "[rust]": { "editor.formatOnSave": true },
+  "[swift]": { "editor.formatOnSave": true }
+}

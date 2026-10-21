@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug macOS app",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/macos",
+      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
+      "preLaunchTask": "Build app"
+    },
+    {
+      "name": "Debug Linux app",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/linux",
+      "program": "${workspaceFolder}/apps/linux/.build/debug/DBClientLinux",
+      "preLaunchTask": "Build app"
+    },
+    {
+      "name": "Debug Windows app",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/windows",
+      "program": "${workspaceFolder}/apps/windows/.build/debug/DBClientWindows.exe",
+      "preLaunchTask": "Build app"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+/target
+/dist
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+.DS_Store
+swift/lib/*
+!swift/lib/.gitkeep
+# Added by code-review-graph
+.code-review-graph/
