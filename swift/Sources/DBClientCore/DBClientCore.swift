@@ -481,6 +481,94 @@ fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
+    typealias FfiType = UInt64
+    typealias SwiftType = UInt64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
+    typealias FfiType = Int64
+    typealias SwiftType = Int64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterBool : FfiConverter {
+    typealias FfiType = Int8
+    typealias SwiftType = Bool
+
+    public static func lift(_ value: Int8) throws -> Bool {
+        return value != 0
+    }
+
+    public static func lower(_ value: Bool) -> Int8 {
+        return value ? 1 : 0
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
@@ -524,24 +612,62 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
 
 
 
-/**
- * Holds the saved connections. Placeholder for the real connection manager.
- */
+
 public protocol ConnectionManagerProtocol: AnyObject, Sendable {
     
-    func add(config: ConnectionConfig) throws 
+    func addHistory(id: String, entry: HistoryEntry) throws 
+    
+    /**
+     * Removes the connection, its password and its history.
+     */
+    func delete(id: String) throws 
+    
+    func get(id: String)  -> ConnectionConfig?
+    
+    func hasPassword(id: String) throws  -> Bool
+    
+    /**
+     * Newest first.
+     */
+    func history(id: String, limit: UInt32) throws  -> [HistoryEntry]
     
     func list()  -> [ConnectionConfig]
     
-    func testConnection(config: ConnectionConfig) throws 
+    func `open`(id: String) async throws  -> Session
+    
+    /**
+     * Saves (or updates) a connection and returns it with its id.
+     * `password`: `None` keeps the stored one, `Some("")` removes it.
+     */
+    func save(config: ConnectionConfig, password: String?) throws  -> ConnectionConfig
+    
+    /**
+     * Connects, reads the server version and disconnects.
+     * `password: None` uses the saved one for an already-saved config.
+     */
+    func test(config: ConnectionConfig, password: String?) async throws  -> ServerInfo
     
 }
-/**
- * Holds the saved connections. Placeholder for the real connection manager.
- */
 open class ConnectionManager: ConnectionManagerProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
@@ -581,9 +707,12 @@ open class ConnectionManager: ConnectionManagerProtocol, @unchecked Sendable {
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_dbclient_core_fn_clone_connectionmanager(self.handle, $0) }
     }
-public convenience init() {
+    /**
+     * Uses the platform's config/data directories and the OS keychain.
+     */
+public convenience init()throws  {
     let handle =
-        try! rustCall() {
+        try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
     uniffi_dbclient_core_fn_constructor_connectionmanager_new(uniffiCallStatus
     )
@@ -601,15 +730,76 @@ public convenience init() {
     }
 
     
+    /**
+     * Keeps everything under `dir`. With `use_keychain` false, passwords are
+     * held in memory only (tests, throwaway sessions).
+     */
+public static func withDirectory(dir: String, useKeychain: Bool)throws  -> ConnectionManager  {
+    return try  FfiConverterTypeConnectionManager_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_constructor_connectionmanager_with_directory(
+        FfiConverterString.lower(dir),
+        FfiConverterBool.lower(useKeychain),uniffiCallStatus
+    )
+})
+}
+    
 
     
-open func add(config: ConnectionConfig)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
+open func addHistory(id: String, entry: HistoryEntry)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_add(
+    uniffi_dbclient_core_fn_method_connectionmanager_add_history(
             self.uniffiCloneHandle(),
-        FfiConverterTypeConnectionConfig_lower(config),uniffiCallStatus
+        FfiConverterString.lower(id),
+        FfiConverterTypeHistoryEntry_lower(entry),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Removes the connection, its password and its history.
+     */
+open func delete(id: String)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_connectionmanager_delete(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+open func get(id: String) -> ConnectionConfig?  {
+    return try!  FfiConverterOptionTypeConnectionConfig.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_connectionmanager_get(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
+    )
+})
+}
+    
+open func hasPassword(id: String)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_connectionmanager_has_password(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Newest first.
+     */
+open func history(id: String, limit: UInt32)throws  -> [HistoryEntry]  {
+    return try  FfiConverterSequenceTypeHistoryEntry.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_connectionmanager_history(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterUInt32.lower(limit),uniffiCallStatus
+    )
+})
 }
     
 open func list() -> [ConnectionConfig]  {
@@ -621,13 +811,55 @@ open func list() -> [ConnectionConfig]  {
 })
 }
     
-open func testConnection(config: ConnectionConfig)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
-        uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_test_connection(
-            self.uniffiCloneHandle(),
-        FfiConverterTypeConnectionConfig_lower(config),uniffiCallStatus
-    )
+open func `open`(id: String)async throws  -> Session  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_connectionmanager_open(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(id)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_u64,
+            completeFunc: ffi_dbclient_core_rust_future_complete_u64,
+            freeFunc: ffi_dbclient_core_rust_future_free_u64,
+            liftFunc: FfiConverterTypeSession_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
 }
+    
+    /**
+     * Saves (or updates) a connection and returns it with its id.
+     * `password`: `None` keeps the stored one, `Some("")` removes it.
+     */
+open func save(config: ConnectionConfig, password: String?)throws  -> ConnectionConfig  {
+    return try  FfiConverterTypeConnectionConfig_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_connectionmanager_save(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeConnectionConfig_lower(config),
+        FfiConverterOptionString.lower(password),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Connects, reads the server version and disconnects.
+     * `password: None` uses the saved one for an already-saved config.
+     */
+open func test(config: ConnectionConfig, password: String?)async throws  -> ServerInfo  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_connectionmanager_test(
+                        self.uniffiCloneHandle(),FfiConverterTypeConnectionConfig_lower(config),FfiConverterOptionString.lower(password)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeServerInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
 }
     
 
@@ -678,26 +910,748 @@ public func FfiConverterTypeConnectionManager_lower(_ value: ConnectionManager) 
 
 
 
+
+
 /**
- * Everything needed to open a connection.
+ * A running query. Dropping it cancels the query.
  */
-public struct ConnectionConfig: Equatable, Hashable {
+public protocol QueryCursorProtocol: AnyObject, Sendable {
+    
+    /**
+     * Stops the query, on the server too where the engine supports it.
+     */
+    func cancel() 
+    
+    /**
+     * Waits until the result's columns are known. Empty for statements
+     * that return no rows.
+     */
+    func columns() async throws  -> [ColumnInfo]
+    
+    /**
+     * Time until the last row arrived, or the time so far while running.
+     */
+    func elapsedMs()  -> UInt64
+    
+    func isDone()  -> Bool
+    
+    /**
+     * Up to `max_rows` rows. Waits for at least one row (or the end), then
+     * returns whatever has arrived, so the first rows show up quickly.
+     */
+    func nextPage(maxRows: UInt32) async throws  -> Page
+    
+    /**
+     * Set once the query has finished; for writes, the rows changed.
+     */
+    func rowsAffected()  -> UInt64?
+    
+}
+/**
+ * A running query. Dropping it cancels the query.
+ */
+open class QueryCursor: QueryCursorProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_dbclient_core_fn_clone_querycursor(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_dbclient_core_fn_free_querycursor(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Stops the query, on the server too where the engine supports it.
+     */
+open func cancel()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_querycursor_cancel(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Waits until the result's columns are known. Empty for statements
+     * that return no rows.
+     */
+open func columns()async throws  -> [ColumnInfo]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_querycursor_columns(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeColumnInfo.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Time until the last row arrived, or the time so far while running.
+     */
+open func elapsedMs() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_querycursor_elapsed_ms(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func isDone() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_querycursor_is_done(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Up to `max_rows` rows. Waits for at least one row (or the end), then
+     * returns whatever has arrived, so the first rows show up quickly.
+     */
+open func nextPage(maxRows: UInt32)async throws  -> Page  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_querycursor_next_page(
+                        self.uniffiCloneHandle(),FfiConverterUInt32.lower(maxRows)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypePage_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Set once the query has finished; for writes, the rows changed.
+     */
+open func rowsAffected() -> UInt64?  {
+    return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_querycursor_rows_affected(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeQueryCursor: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = QueryCursor
+
+    public static func lift(_ handle: UInt64) throws -> QueryCursor {
+        return QueryCursor(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: QueryCursor) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> QueryCursor {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: QueryCursor, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueryCursor_lift(_ handle: UInt64) throws -> QueryCursor {
+    return try FfiConverterTypeQueryCursor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueryCursor_lower(_ value: QueryCursor) -> UInt64 {
+    return FfiConverterTypeQueryCursor.lower(value)
+}
+
+
+
+
+
+
+/**
+ * One open connection (internally a small pool). Cheap to share between tabs.
+ */
+public protocol SessionProtocol: AnyObject, Sendable {
+    
+    /**
+     * Classifies `query` in this engine's language, for confirmation prompts.
+     */
+    func classify(query: String)  -> StatementKind
+    
+    func close() async 
+    
+    func config()  -> ConnectionConfig
+    
+    /**
+     * Rows `offset..offset+limit` of a table or view, for table tabs.
+     */
+    func fetchWindow(path: [String], offset: UInt64, limit: UInt32) async throws  -> Window
+    
+    /**
+     * Type, TTL and memory of the key at `path` (Redis).
+     */
+    func keyInfo(path: [String]) async throws  -> KeyInfo
+    
+    /**
+     * Children of the browse-tree node at `path`; `[]` is the root.
+     */
+    func listChildren(path: [String]) async throws  -> [BrowseNode]
+    
+    /**
+     * Round-trip time in milliseconds.
+     */
+    func ping() async throws  -> Double
+    
+    /**
+     * Starts `query` and returns at once. Rows are pulled with
+     * [`QueryCursor::next_page`]; errors arrive there too.
+     */
+    func query(query: String, database: String?) throws  -> QueryCursor
+    
+    func readOnly()  -> Bool
+    
+    func rowCount(path: [String]) async throws  -> RowCount
+    
+    func serverInfo() async throws  -> ServerInfo
+    
+}
+/**
+ * One open connection (internally a small pool). Cheap to share between tabs.
+ */
+open class Session: SessionProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_dbclient_core_fn_clone_session(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_dbclient_core_fn_free_session(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Classifies `query` in this engine's language, for confirmation prompts.
+     */
+open func classify(query: String) -> StatementKind  {
+    return try!  FfiConverterTypeStatementKind_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_session_classify(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(query),uniffiCallStatus
+    )
+})
+}
+    
+open func close()async   {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_close(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_void,
+            completeFunc: ffi_dbclient_core_rust_future_complete_void,
+            freeFunc: ffi_dbclient_core_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: nil
+            
+        )
+}
+    
+open func config() -> ConnectionConfig  {
+    return try!  FfiConverterTypeConnectionConfig_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_session_config(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Rows `offset..offset+limit` of a table or view, for table tabs.
+     */
+open func fetchWindow(path: [String], offset: UInt64, limit: UInt32)async throws  -> Window  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_fetch_window(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterUInt64.lower(offset),FfiConverterUInt32.lower(limit)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeWindow_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Type, TTL and memory of the key at `path` (Redis).
+     */
+open func keyInfo(path: [String])async throws  -> KeyInfo  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_key_info(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeKeyInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Children of the browse-tree node at `path`; `[]` is the root.
+     */
+open func listChildren(path: [String])async throws  -> [BrowseNode]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_list_children(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeBrowseNode.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Round-trip time in milliseconds.
+     */
+open func ping()async throws  -> Double  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_ping(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_f64,
+            completeFunc: ffi_dbclient_core_rust_future_complete_f64,
+            freeFunc: ffi_dbclient_core_rust_future_free_f64,
+            liftFunc: FfiConverterDouble.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Starts `query` and returns at once. Rows are pulled with
+     * [`QueryCursor::next_page`]; errors arrive there too.
+     */
+open func query(query: String, database: String?)throws  -> QueryCursor  {
+    return try  FfiConverterTypeQueryCursor_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_session_query(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(query),
+        FfiConverterOptionString.lower(database),uniffiCallStatus
+    )
+})
+}
+    
+open func readOnly() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_method_session_read_only(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func rowCount(path: [String])async throws  -> RowCount  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_row_count(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeRowCount_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+open func serverInfo()async throws  -> ServerInfo  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_server_info(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeServerInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSession: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Session
+
+    public static func lift(_ handle: UInt64) throws -> Session {
+        return Session(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Session) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Session {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Session, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSession_lift(_ handle: UInt64) throws -> Session {
+    return try FfiConverterTypeSession.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSession_lower(_ value: Session) -> UInt64 {
+    return FfiConverterTypeSession.lower(value)
+}
+
+
+
+
+/**
+ * One entry in the object browser. Its path is the parent path plus `name`.
+ */
+public struct BrowseNode: Equatable, Hashable {
     public var name: String
-    public var kind: DatabaseKind
-    public var host: String
-    public var port: UInt16
-    public var database: String
-    public var username: String
+    public var kind: NodeKind
+    public var hasChildren: Bool
+    /**
+     * Secondary text: a column type, a key count, a Redis key type.
+     */
+    public var detail: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, kind: DatabaseKind, host: String, port: UInt16, database: String, username: String) {
+    public init(name: String, kind: NodeKind, hasChildren: Bool, 
+        /**
+         * Secondary text: a column type, a key count, a Redis key type.
+         */detail: String?) {
+        self.name = name
+        self.kind = kind
+        self.hasChildren = hasChildren
+        self.detail = detail
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BrowseNode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBrowseNode: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowseNode {
+        return
+            try BrowseNode(
+                name: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeNodeKind.read(from: &buf), 
+                hasChildren: FfiConverterBool.read(from: &buf), 
+                detail: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BrowseNode, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterTypeNodeKind.write(value.kind, into: &buf)
+        FfiConverterBool.write(value.hasChildren, into: &buf)
+        FfiConverterOptionString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrowseNode_lift(_ buf: RustBuffer) throws -> BrowseNode {
+    return try FfiConverterTypeBrowseNode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrowseNode_lower(_ value: BrowseNode) -> RustBuffer {
+    return FfiConverterTypeBrowseNode.lower(value)
+}
+
+
+public struct ColumnInfo: Equatable, Hashable {
+    public var name: String
+    /**
+     * The engine's own type name, e.g. `INT4`, `VARCHAR`, `hash`.
+     */
+    public var typeName: String
+    public var kind: ValueKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, 
+        /**
+         * The engine's own type name, e.g. `INT4`, `VARCHAR`, `hash`.
+         */typeName: String, kind: ValueKind) {
+        self.name = name
+        self.typeName = typeName
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ColumnInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeColumnInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ColumnInfo {
+        return
+            try ColumnInfo(
+                name: FfiConverterString.read(from: &buf), 
+                typeName: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeValueKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ColumnInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.typeName, into: &buf)
+        FfiConverterTypeValueKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeColumnInfo_lift(_ buf: RustBuffer) throws -> ColumnInfo {
+    return try FfiConverterTypeColumnInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeColumnInfo_lower(_ value: ColumnInfo) -> RustBuffer {
+    return FfiConverterTypeColumnInfo.lower(value)
+}
+
+
+/**
+ * Everything needed to open a connection, except the password.
+ */
+public struct ConnectionConfig: Equatable, Hashable {
+    /**
+     * Stable id; also the keychain account name. Empty means "assign one on save".
+     */
+    public var id: String
+    public var name: String
+    public var kind: DatabaseKind
+    /**
+     * Host name. For SQLite, the database file path. For MongoDB, may be a
+     * comma-separated `host:port` list.
+     */
+    public var host: String
+    public var port: UInt16
+    /**
+     * Default database. For Redis, the db index (`"0"`).
+     */
+    public var database: String
+    public var username: String
+    public var environment: EnvironmentTag
+    public var colorTag: String?
+    public var readOnly: Bool
+    public var tls: TlsMode
+    /**
+     * Engine-specific extras, e.g. `authSource`, `srv`.
+     */
+    public var options: [String: String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Stable id; also the keychain account name. Empty means "assign one on save".
+         */id: String, name: String, kind: DatabaseKind, 
+        /**
+         * Host name. For SQLite, the database file path. For MongoDB, may be a
+         * comma-separated `host:port` list.
+         */host: String, port: UInt16, 
+        /**
+         * Default database. For Redis, the db index (`"0"`).
+         */database: String, username: String, environment: EnvironmentTag, colorTag: String?, readOnly: Bool, tls: TlsMode, 
+        /**
+         * Engine-specific extras, e.g. `authSource`, `srv`.
+         */options: [String: String]) {
+        self.id = id
         self.name = name
         self.kind = kind
         self.host = host
         self.port = port
         self.database = database
         self.username = username
+        self.environment = environment
+        self.colorTag = colorTag
+        self.readOnly = readOnly
+        self.tls = tls
+        self.options = options
     }
 
     
@@ -716,22 +1670,34 @@ public struct FfiConverterTypeConnectionConfig: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConnectionConfig {
         return
             try ConnectionConfig(
+                id: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
                 kind: FfiConverterTypeDatabaseKind.read(from: &buf), 
                 host: FfiConverterString.read(from: &buf), 
                 port: FfiConverterUInt16.read(from: &buf), 
                 database: FfiConverterString.read(from: &buf), 
-                username: FfiConverterString.read(from: &buf)
+                username: FfiConverterString.read(from: &buf), 
+                environment: FfiConverterTypeEnvironmentTag.read(from: &buf), 
+                colorTag: FfiConverterOptionString.read(from: &buf), 
+                readOnly: FfiConverterBool.read(from: &buf), 
+                tls: FfiConverterTypeTlsMode.read(from: &buf), 
+                options: FfiConverterDictionaryStringString.read(from: &buf)
         )
     }
 
     public static func write(_ value: ConnectionConfig, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterTypeDatabaseKind.write(value.kind, into: &buf)
         FfiConverterString.write(value.host, into: &buf)
         FfiConverterUInt16.write(value.port, into: &buf)
         FfiConverterString.write(value.database, into: &buf)
         FfiConverterString.write(value.username, into: &buf)
+        FfiConverterTypeEnvironmentTag.write(value.environment, into: &buf)
+        FfiConverterOptionString.write(value.colorTag, into: &buf)
+        FfiConverterBool.write(value.readOnly, into: &buf)
+        FfiConverterTypeTlsMode.write(value.tls, into: &buf)
+        FfiConverterDictionaryStringString.write(value.options, into: &buf)
     }
 }
 
@@ -751,14 +1717,531 @@ public func FfiConverterTypeConnectionConfig_lower(_ value: ConnectionConfig) ->
 }
 
 
+public struct HistoryEntry: Equatable, Hashable {
+    public var query: String
+    /**
+     * Unix time in milliseconds.
+     */
+    public var executedAtMs: Int64
+    public var durationMs: UInt64
+    public var rows: UInt64?
+    public var succeeded: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(query: String, 
+        /**
+         * Unix time in milliseconds.
+         */executedAtMs: Int64, durationMs: UInt64, rows: UInt64?, succeeded: Bool) {
+        self.query = query
+        self.executedAtMs = executedAtMs
+        self.durationMs = durationMs
+        self.rows = rows
+        self.succeeded = succeeded
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HistoryEntry: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHistoryEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HistoryEntry {
+        return
+            try HistoryEntry(
+                query: FfiConverterString.read(from: &buf), 
+                executedAtMs: FfiConverterInt64.read(from: &buf), 
+                durationMs: FfiConverterUInt64.read(from: &buf), 
+                rows: FfiConverterOptionUInt64.read(from: &buf), 
+                succeeded: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HistoryEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.query, into: &buf)
+        FfiConverterInt64.write(value.executedAtMs, into: &buf)
+        FfiConverterUInt64.write(value.durationMs, into: &buf)
+        FfiConverterOptionUInt64.write(value.rows, into: &buf)
+        FfiConverterBool.write(value.succeeded, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHistoryEntry_lift(_ buf: RustBuffer) throws -> HistoryEntry {
+    return try FfiConverterTypeHistoryEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHistoryEntry_lower(_ value: HistoryEntry) -> RustBuffer {
+    return FfiConverterTypeHistoryEntry.lower(value)
+}
+
+
+/**
+ * Header details for a Redis key tab.
+ */
+public struct KeyInfo: Equatable, Hashable {
+    /**
+     * string, hash, list, set, zset, stream, ReJSON-RL...
+     */
+    public var keyType: String
+    /**
+     * None when the key has no expiry.
+     */
+    public var ttlMs: Int64?
+    public var memoryBytes: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * string, hash, list, set, zset, stream, ReJSON-RL...
+         */keyType: String, 
+        /**
+         * None when the key has no expiry.
+         */ttlMs: Int64?, memoryBytes: UInt64?) {
+        self.keyType = keyType
+        self.ttlMs = ttlMs
+        self.memoryBytes = memoryBytes
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension KeyInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeKeyInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> KeyInfo {
+        return
+            try KeyInfo(
+                keyType: FfiConverterString.read(from: &buf), 
+                ttlMs: FfiConverterOptionInt64.read(from: &buf), 
+                memoryBytes: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: KeyInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.keyType, into: &buf)
+        FfiConverterOptionInt64.write(value.ttlMs, into: &buf)
+        FfiConverterOptionUInt64.write(value.memoryBytes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeyInfo_lift(_ buf: RustBuffer) throws -> KeyInfo {
+    return try FfiConverterTypeKeyInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeyInfo_lower(_ value: KeyInfo) -> RustBuffer {
+    return FfiConverterTypeKeyInfo.lower(value)
+}
+
+
+/**
+ * A page of rows pulled from a running query.
+ */
+public struct Page: Equatable, Hashable {
+    public var rows: [Row]
+    /**
+     * No more rows will come after this page.
+     */
+    public var done: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(rows: [Row], 
+        /**
+         * No more rows will come after this page.
+         */done: Bool) {
+        self.rows = rows
+        self.done = done
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Page: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Page {
+        return
+            try Page(
+                rows: FfiConverterSequenceTypeRow.read(from: &buf), 
+                done: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Page, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeRow.write(value.rows, into: &buf)
+        FfiConverterBool.write(value.done, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePage_lift(_ buf: RustBuffer) throws -> Page {
+    return try FfiConverterTypePage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePage_lower(_ value: Page) -> RustBuffer {
+    return FfiConverterTypePage.lower(value)
+}
+
+
+/**
+ * The result of parsing a pasted connection URL.
+ */
+public struct ParsedConnection: Equatable, Hashable {
+    public var config: ConnectionConfig
+    /**
+     * Taken out of the URL so the UI can hand it to the keychain.
+     */
+    public var password: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(config: ConnectionConfig, 
+        /**
+         * Taken out of the URL so the UI can hand it to the keychain.
+         */password: String?) {
+        self.config = config
+        self.password = password
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ParsedConnection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeParsedConnection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ParsedConnection {
+        return
+            try ParsedConnection(
+                config: FfiConverterTypeConnectionConfig.read(from: &buf), 
+                password: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ParsedConnection, into buf: inout [UInt8]) {
+        FfiConverterTypeConnectionConfig.write(value.config, into: &buf)
+        FfiConverterOptionString.write(value.password, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeParsedConnection_lift(_ buf: RustBuffer) throws -> ParsedConnection {
+    return try FfiConverterTypeParsedConnection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeParsedConnection_lower(_ value: ParsedConnection) -> RustBuffer {
+    return FfiConverterTypeParsedConnection.lower(value)
+}
+
+
+public struct Row: Equatable, Hashable {
+    public var cells: [Value]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(cells: [Value]) {
+        self.cells = cells
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Row: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Row {
+        return
+            try Row(
+                cells: FfiConverterSequenceTypeValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Row, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeValue.write(value.cells, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRow_lift(_ buf: RustBuffer) throws -> Row {
+    return try FfiConverterTypeRow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRow_lower(_ value: Row) -> RustBuffer {
+    return FfiConverterTypeRow.lower(value)
+}
+
+
+public struct RowCount: Equatable, Hashable {
+    public var count: UInt64
+    /**
+     * False when the engine only gave an estimate.
+     */
+    public var exact: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(count: UInt64, 
+        /**
+         * False when the engine only gave an estimate.
+         */exact: Bool) {
+        self.count = count
+        self.exact = exact
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RowCount: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRowCount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RowCount {
+        return
+            try RowCount(
+                count: FfiConverterUInt64.read(from: &buf), 
+                exact: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RowCount, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.count, into: &buf)
+        FfiConverterBool.write(value.exact, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRowCount_lift(_ buf: RustBuffer) throws -> RowCount {
+    return try FfiConverterTypeRowCount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRowCount_lower(_ value: RowCount) -> RustBuffer {
+    return FfiConverterTypeRowCount.lower(value)
+}
+
+
+public struct ServerInfo: Equatable, Hashable {
+    /**
+     * e.g. "PostgreSQL", "MariaDB", "Redis".
+     */
+    public var engine: String
+    public var version: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * e.g. "PostgreSQL", "MariaDB", "Redis".
+         */engine: String, version: String) {
+        self.engine = engine
+        self.version = version
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ServerInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeServerInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ServerInfo {
+        return
+            try ServerInfo(
+                engine: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ServerInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.engine, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeServerInfo_lift(_ buf: RustBuffer) throws -> ServerInfo {
+    return try FfiConverterTypeServerInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeServerInfo_lower(_ value: ServerInfo) -> RustBuffer {
+    return FfiConverterTypeServerInfo.lower(value)
+}
+
+
+/**
+ * A random-access slice of a table or collection, for table tabs.
+ */
+public struct Window: Equatable, Hashable {
+    public var columns: [ColumnInfo]
+    public var rows: [Row]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(columns: [ColumnInfo], rows: [Row]) {
+        self.columns = columns
+        self.rows = rows
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Window: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWindow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Window {
+        return
+            try Window(
+                columns: FfiConverterSequenceTypeColumnInfo.read(from: &buf), 
+                rows: FfiConverterSequenceTypeRow.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Window, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeColumnInfo.write(value.columns, into: &buf)
+        FfiConverterSequenceTypeRow.write(value.rows, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWindow_lift(_ buf: RustBuffer) throws -> Window {
+    return try FfiConverterTypeWindow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWindow_lower(_ value: Window) -> RustBuffer {
+    return FfiConverterTypeWindow.lower(value)
+}
+
+
 public 
 enum CoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
-    case NotImplemented(String
+    case NotImplemented(message: String
     )
-    case InvalidConfig(String
+    case InvalidConfig(message: String
+    )
+    case Connection(message: String
+    )
+    case Auth(message: String
+    )
+    case Query(message: String, position: UInt32?
+    )
+    case Cancelled
+    case Timeout(message: String
+    )
+    case Secret(message: String
+    )
+    case Unsupported(message: String
+    )
+    case NotFound(message: String
+    )
+    case ReadOnly(message: String
+    )
+    case Internal(message: String
     )
 
     
@@ -790,10 +2273,39 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
 
         
         case 1: return .NotImplemented(
-            try FfiConverterString.read(from: &buf)
+            message: try FfiConverterString.read(from: &buf)
             )
         case 2: return .InvalidConfig(
-            try FfiConverterString.read(from: &buf)
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .Connection(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .Auth(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 5: return .Query(
+            message: try FfiConverterString.read(from: &buf), 
+            position: try FfiConverterOptionUInt32.read(from: &buf)
+            )
+        case 6: return .Cancelled
+        case 7: return .Timeout(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .Secret(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .Unsupported(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .NotFound(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 11: return .ReadOnly(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 12: return .Internal(
+            message: try FfiConverterString.read(from: &buf)
             )
 
          default: throw UniffiInternalError.unexpectedEnumCase
@@ -807,14 +2319,64 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
 
         
         
-        case let .NotImplemented(v1):
+        case let .NotImplemented(message):
             writeInt(&buf, Int32(1))
-            FfiConverterString.write(v1, into: &buf)
+            FfiConverterString.write(message, into: &buf)
             
         
-        case let .InvalidConfig(v1):
+        case let .InvalidConfig(message):
             writeInt(&buf, Int32(2))
-            FfiConverterString.write(v1, into: &buf)
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Connection(message):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Auth(message):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Query(message,position):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            FfiConverterOptionUInt32.write(position, into: &buf)
+            
+        
+        case .Cancelled:
+            writeInt(&buf, Int32(6))
+        
+        
+        case let .Timeout(message):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Secret(message):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Unsupported(message):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .NotFound(message):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .ReadOnly(message):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Internal(message):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(message, into: &buf)
             
         }
     }
@@ -836,15 +2398,14 @@ public func FfiConverterTypeCoreError_lower(_ value: CoreError) -> RustBuffer {
 }
 
 
-/**
- * Database engines the client will support. Drivers come later.
- */
 
 public enum DatabaseKind: Equatable, Hashable {
     
     case postgres
     case mySql
     case sqlite
+    case mongoDb
+    case redis
 
 
 
@@ -872,6 +2433,10 @@ public struct FfiConverterTypeDatabaseKind: FfiConverterRustBuffer {
         
         case 3: return .sqlite
         
+        case 4: return .mongoDb
+        
+        case 5: return .redis
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -890,6 +2455,14 @@ public struct FfiConverterTypeDatabaseKind: FfiConverterRustBuffer {
         
         case .sqlite:
             writeInt(&buf, Int32(3))
+        
+        
+        case .mongoDb:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .redis:
+            writeInt(&buf, Int32(5))
         
         }
     }
@@ -910,6 +2483,903 @@ public func FfiConverterTypeDatabaseKind_lower(_ value: DatabaseKind) -> RustBuf
     return FfiConverterTypeDatabaseKind.lower(value)
 }
 
+
+
+/**
+ * Where a connection points. Drives the colour tag and production guards.
+ */
+
+public enum EnvironmentTag: Equatable, Hashable {
+    
+    case local
+    case dev
+    case staging
+    case prod
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension EnvironmentTag: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEnvironmentTag: FfiConverterRustBuffer {
+    typealias SwiftType = EnvironmentTag
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EnvironmentTag {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .local
+        
+        case 2: return .dev
+        
+        case 3: return .staging
+        
+        case 4: return .prod
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: EnvironmentTag, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .local:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .dev:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .staging:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .prod:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEnvironmentTag_lift(_ buf: RustBuffer) throws -> EnvironmentTag {
+    return try FfiConverterTypeEnvironmentTag.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEnvironmentTag_lower(_ value: EnvironmentTag) -> RustBuffer {
+    return FfiConverterTypeEnvironmentTag.lower(value)
+}
+
+
+
+
+public enum NodeKind: Equatable, Hashable {
+    
+    case database
+    case schema
+    /**
+     * A grouping such as "Tables" or "Views".
+     */
+    case folder
+    case table
+    case view
+    case function
+    case column
+    case collection
+    case index
+    /**
+     * A Redis key prefix group (`user:`).
+     */
+    case keyPrefix
+    case key
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension NodeKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNodeKind: FfiConverterRustBuffer {
+    typealias SwiftType = NodeKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NodeKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .database
+        
+        case 2: return .schema
+        
+        case 3: return .folder
+        
+        case 4: return .table
+        
+        case 5: return .view
+        
+        case 6: return .function
+        
+        case 7: return .column
+        
+        case 8: return .collection
+        
+        case 9: return .index
+        
+        case 10: return .keyPrefix
+        
+        case 11: return .key
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NodeKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .database:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .schema:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .folder:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .table:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .view:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .function:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .column:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .collection:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .index:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .keyPrefix:
+            writeInt(&buf, Int32(10))
+        
+        
+        case .key:
+            writeInt(&buf, Int32(11))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNodeKind_lift(_ buf: RustBuffer) throws -> NodeKind {
+    return try FfiConverterTypeNodeKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNodeKind_lower(_ value: NodeKind) -> RustBuffer {
+    return FfiConverterTypeNodeKind.lower(value)
+}
+
+
+
+/**
+ * Ordered from harmless to dangerous, so `max` gives a script's overall kind.
+ */
+
+public enum StatementKind: Equatable, Hashable {
+    
+    case read
+    case write
+    case ddl
+    /**
+     * DROP, TRUNCATE, DELETE/UPDATE without WHERE, FLUSHALL, dropDatabase...
+     */
+    case destructive
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension StatementKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStatementKind: FfiConverterRustBuffer {
+    typealias SwiftType = StatementKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StatementKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .read
+        
+        case 2: return .write
+        
+        case 3: return .ddl
+        
+        case 4: return .destructive
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: StatementKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .read:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .write:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .ddl:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .destructive:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStatementKind_lift(_ buf: RustBuffer) throws -> StatementKind {
+    return try FfiConverterTypeStatementKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStatementKind_lower(_ value: StatementKind) -> RustBuffer {
+    return FfiConverterTypeStatementKind.lower(value)
+}
+
+
+
+
+public enum TlsMode: Equatable, Hashable {
+    
+    case disable
+    case prefer
+    case require
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TlsMode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTlsMode: FfiConverterRustBuffer {
+    typealias SwiftType = TlsMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TlsMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .disable
+        
+        case 2: return .prefer
+        
+        case 3: return .require
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TlsMode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .disable:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .prefer:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .require:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTlsMode_lift(_ buf: RustBuffer) throws -> TlsMode {
+    return try FfiConverterTypeTlsMode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTlsMode_lower(_ value: TlsMode) -> RustBuffer {
+    return FfiConverterTypeTlsMode.lower(value)
+}
+
+
+
+/**
+ * A single cell. Dates and times are ISO-8601 text so the FFI stays simple.
+ */
+
+public enum Value: Equatable, Hashable {
+    
+    case null
+    case bool(v: Bool
+    )
+    case int(v: Int64
+    )
+    case float(v: Double
+    )
+    /**
+     * Exact numerics (NUMERIC, DECIMAL) and integers too large for i64.
+     */
+    case decimal(v: String
+    )
+    case text(v: String
+    )
+    case bytes(v: Data
+    )
+    case date(v: String
+    )
+    case time(v: String
+    )
+    case timestamp(v: String, hasTz: Bool
+    )
+    case uuid(v: String
+    )
+    /**
+     * JSON text: JSON/JSONB columns, Mongo documents, nested Redis replies.
+     */
+    case json(v: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension Value: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeValue: FfiConverterRustBuffer {
+    typealias SwiftType = Value
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Value {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .null
+        
+        case 2: return .bool(v: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 3: return .int(v: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 4: return .float(v: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 5: return .decimal(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 6: return .text(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .bytes(v: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 8: return .date(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 9: return .time(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 10: return .timestamp(v: try FfiConverterString.read(from: &buf), hasTz: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 11: return .uuid(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 12: return .json(v: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: Value, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .null:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .bool(v):
+            writeInt(&buf, Int32(2))
+            FfiConverterBool.write(v, into: &buf)
+            
+        
+        case let .int(v):
+            writeInt(&buf, Int32(3))
+            FfiConverterInt64.write(v, into: &buf)
+            
+        
+        case let .float(v):
+            writeInt(&buf, Int32(4))
+            FfiConverterDouble.write(v, into: &buf)
+            
+        
+        case let .decimal(v):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(v, into: &buf)
+            
+        
+        case let .text(v):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(v, into: &buf)
+            
+        
+        case let .bytes(v):
+            writeInt(&buf, Int32(7))
+            FfiConverterData.write(v, into: &buf)
+            
+        
+        case let .date(v):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(v, into: &buf)
+            
+        
+        case let .time(v):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(v, into: &buf)
+            
+        
+        case let .timestamp(v,hasTz):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(v, into: &buf)
+            FfiConverterBool.write(hasTz, into: &buf)
+            
+        
+        case let .uuid(v):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(v, into: &buf)
+            
+        
+        case let .json(v):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(v, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeValue_lift(_ buf: RustBuffer) throws -> Value {
+    return try FfiConverterTypeValue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeValue_lower(_ value: Value) -> RustBuffer {
+    return FfiConverterTypeValue.lower(value)
+}
+
+
+
+/**
+ * The kind of a column, used by the UI for colours and alignment.
+ */
+
+public enum ValueKind: Equatable, Hashable {
+    
+    case bool
+    case int
+    case float
+    case decimal
+    case text
+    case bytes
+    case date
+    case time
+    case timestamp
+    case timestampTz
+    case uuid
+    case json
+    case other
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ValueKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeValueKind: FfiConverterRustBuffer {
+    typealias SwiftType = ValueKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ValueKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .bool
+        
+        case 2: return .int
+        
+        case 3: return .float
+        
+        case 4: return .decimal
+        
+        case 5: return .text
+        
+        case 6: return .bytes
+        
+        case 7: return .date
+        
+        case 8: return .time
+        
+        case 9: return .timestamp
+        
+        case 10: return .timestampTz
+        
+        case 11: return .uuid
+        
+        case 12: return .json
+        
+        case 13: return .other
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ValueKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .bool:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .int:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .float:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .decimal:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .text:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .bytes:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .date:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .time:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .timestamp:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .timestampTz:
+            writeInt(&buf, Int32(10))
+        
+        
+        case .uuid:
+            writeInt(&buf, Int32(11))
+        
+        
+        case .json:
+            writeInt(&buf, Int32(12))
+        
+        
+        case .other:
+            writeInt(&buf, Int32(13))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeValueKind_lift(_ buf: RustBuffer) throws -> ValueKind {
+    return try FfiConverterTypeValueKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeValueKind_lower(_ value: ValueKind) -> RustBuffer {
+    return FfiConverterTypeValueKind.lower(value)
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
+    typealias SwiftType = Int64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
+    typealias SwiftType = String?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeConnectionConfig: FfiConverterRustBuffer {
+    typealias SwiftType = ConnectionConfig?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeConnectionConfig.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeConnectionConfig.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeBrowseNode: FfiConverterRustBuffer {
+    typealias SwiftType = [BrowseNode]
+
+    public static func write(_ value: [BrowseNode], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBrowseNode.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BrowseNode] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BrowseNode]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBrowseNode.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeColumnInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [ColumnInfo]
+
+    public static func write(_ value: [ColumnInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeColumnInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ColumnInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ColumnInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeColumnInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -935,6 +3405,155 @@ fileprivate struct FfiConverterSequenceTypeConnectionConfig: FfiConverterRustBuf
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeHistoryEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [HistoryEntry]
+
+    public static func write(_ value: [HistoryEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeHistoryEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [HistoryEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [HistoryEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeHistoryEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRow: FfiConverterRustBuffer {
+    typealias SwiftType = [Row]
+
+    public static func write(_ value: [Row], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Row] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Row]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeValue: FfiConverterRustBuffer {
+    typealias SwiftType = [Value]
+
+    public static func write(_ value: [Value], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeValue.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Value] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Value]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeValue.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
+    public static func write(_ value: [String: String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterString.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: String] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: String]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterString.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
+private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
+
+fileprivate let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
+
+fileprivate func uniffiRustCallAsync<F, T>(
+    rustFutureFunc: () -> UInt64,
+    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> (),
+    completeFunc: (UInt64, UnsafeMutablePointer<RustCallStatus>) -> F,
+    freeFunc: (UInt64) -> (),
+    liftFunc: (F) throws -> T,
+    errorHandler: ((RustBuffer) throws -> Swift.Error)?
+) async throws -> T {
+    // Make sure to call the ensure init function since future creation doesn't have a
+    // RustCallStatus param, so doesn't use makeRustCall()
+    uniffiEnsureDbclientCoreInitialized()
+    let rustFuture = rustFutureFunc()
+    defer {
+        freeFunc(rustFuture)
+    }
+    var pollResult: Int8;
+    repeat {
+        pollResult = await withUnsafeContinuation {
+            pollFunc(
+                rustFuture,
+                { handle, pollResult in
+                    uniffiFutureContinuationCallback(handle: handle, pollResult: pollResult)
+                },
+                uniffiContinuationHandleMap.insert(obj: $0)
+            )
+        }
+    } while pollResult != UNIFFI_RUST_FUTURE_POLL_READY
+
+    return try liftFunc(makeRustCall(
+        { completeFunc(rustFuture, $0) },
+        errorHandler: errorHandler
+    ))
+}
+
+// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+// lift the return value or error and resume the suspended function.
+fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
+    if let continuation = try? uniffiContinuationHandleMap.remove(handle: handle) {
+        continuation.resume(returning: pollResult)
+    } else {
+        print("uniffiFutureContinuationCallback invalid handle")
+    }
+}
 /**
  * Version of the core library, handy for an About screen.
  */
@@ -946,13 +3565,25 @@ public func coreVersion() -> String  {
 })
 }
 /**
- * Smoke test for the bindings: the UI calls this on launch.
+ * Parses `postgres://`, `mysql://`, `mariadb://`, `sqlite:`, `mongodb://`,
+ * `mongodb+srv://`, `redis://` and `rediss://` URLs.
  */
-public func greet(name: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
+public func parseConnectionUrl(url: String)throws  -> ParsedConnection  {
+    return try  FfiConverterTypeParsedConnection_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_func_greet(
-        FfiConverterString.lower(name),uniffiCallStatus
+    uniffi_dbclient_core_fn_func_parse_connection_url(
+        FfiConverterString.lower(url),uniffiCallStatus
+    )
+})
+}
+/**
+ * Classifies a SQL script. Multi-statement scripts get their most dangerous kind.
+ */
+public func classifyStatement(sql: String) -> StatementKind  {
+    return try!  FfiConverterTypeStatementKind_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_dbclient_core_fn_func_classify_statement(
+        FfiConverterString.lower(sql),uniffiCallStatus
     )
 })
 }
@@ -975,19 +3606,94 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dbclient_core_checksum_func_core_version() != 1312) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_func_greet() != 28197) {
+    if (uniffi_dbclient_core_checksum_func_parse_connection_url() != 10760) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_add() != 17573) {
+    if (uniffi_dbclient_core_checksum_func_classify_statement() != 59610) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_list() != 24498) {
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_add_history() != 15838) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_test_connection() != 14304) {
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_delete() != 28089) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_constructor_connectionmanager_new() != 63568) {
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_get() != 13707) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_has_password() != 61153) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_history() != 13874) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_list() != 27293) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_open() != 51598) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_save() != 24109) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_connectionmanager_test() != 47379) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_cancel() != 64552) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_columns() != 46269) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_elapsed_ms() != 55372) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_is_done() != 6257) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_next_page() != 45067) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_querycursor_rows_affected() != 28816) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_classify() != 40681) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_close() != 17436) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_config() != 48917) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_fetch_window() != 7477) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_key_info() != 7508) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_list_children() != 64244) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_ping() != 1188) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_query() != 19387) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_read_only() != 22680) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_row_count() != 31641) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_server_info() != 38716) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_constructor_connectionmanager_new() != 14515) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_constructor_connectionmanager_with_directory() != 52283) {
         return InitializationResult.apiChecksumMismatch
     }
 

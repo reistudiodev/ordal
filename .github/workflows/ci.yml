@@ -18,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Linux keyring headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      # Server engines are skipped here (no DBCLIENT_TEST_*_URL); SQLite always runs.
       - name: Rust tests
         run: cargo test
       - name: Build core and bindings
@@ -28,6 +32,50 @@ jobs:
       - name: Build app
         run: swift build
         working-directory: apps/${{ matrix.app }}
+
+  # Every driver against real servers. Linux runners are the only ones with Docker.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: dbclient
+        ports: ["55432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: dbclient
+          MYSQL_DATABASE: dbclient
+        ports: ["53306:3306"]
+        options: --health-cmd "mysqladmin ping -h 127.0.0.1 -pdbclient" --health-interval 2s --health-retries 60
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: dbclient
+          MARIADB_DATABASE: dbclient
+        ports: ["53307:3306"]
+        options: --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 2s --health-retries 60
+      mongodb:
+        image: mongo:7
+        ports: ["57017:27017"]
+        options: --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 2s --health-retries 30
+      redis:
+        image: redis:7
+        ports: ["56379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-retries 30
+    env:
+      DBCLIENT_TEST_POSTGRES_URL: postgres://postgres:dbclient@127.0.0.1:55432/postgres
+      DBCLIENT_TEST_MYSQL_URL: mysql://root:dbclient@127.0.0.1:53306/dbclient
+      DBCLIENT_TEST_MARIADB_URL: mariadb://root:dbclient@127.0.0.1:53307/dbclient
+      DBCLIENT_TEST_MONGODB_URL: mongodb://127.0.0.1:57017/dbclient
+      DBCLIENT_TEST_REDIS_URL: redis://127.0.0.1:56379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - run: cargo test -p dbclient-core
 
   # Swift on Windows isn't preinstalled on runners; this checks the Rust side for now.
   windows-core:

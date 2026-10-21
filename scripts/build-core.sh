@@ -22,6 +22,9 @@ done
 CARGO_FLAGS=()
 [ "$PROFILE" = release ] && CARGO_FLAGS+=(--release)
 
+# Build C dependencies (SQLite, ring) for the app's minimum macOS, not this machine's.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+
 LIB=libdbclient_core.a
 case "$(uname -s)" in
   Darwin) DYLIB=libdbclient_core.dylib ;;
@@ -33,7 +36,7 @@ if [ "$UNIVERSAL" = 1 ]; then
   [ "$(uname -s)" = Darwin ] || { echo "--universal is macOS only" >&2; exit 1; }
   for t in aarch64-apple-darwin x86_64-apple-darwin; do
     rustup target add "$t" >/dev/null
-    cargo build -p dbclient-core "${CARGO_FLAGS[@]}" --target "$t"
+    cargo build -p dbclient-core ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} --target "$t"
   done
   mkdir -p "target/universal/$PROFILE"
   lipo -create \
@@ -41,9 +44,9 @@ if [ "$UNIVERSAL" = 1 ]; then
     "target/x86_64-apple-darwin/$PROFILE/$LIB" \
     -output "target/universal/$PROFILE/$LIB"
   STATIC="target/universal/$PROFILE/$LIB"
-  cargo build -p dbclient-core "${CARGO_FLAGS[@]}"
+  cargo build -p dbclient-core ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
 else
-  cargo build -p dbclient-core "${CARGO_FLAGS[@]}"
+  cargo build -p dbclient-core ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
   STATIC="target/$PROFILE/$LIB"
 fi
 
