@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// The selected connection's objects, with a fuzzy filter at the top.

@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "DBClientLinux",
+    name: "OrdalLinux",
     dependencies: [
         .package(path: "../../swift"),
     ],
     targets: [
         .executableTarget(
-            name: "DBClientLinux",
-            dependencies: [.product(name: "DBClientCore", package: "swift")],
-            path: "Sources/DBClientLinux"
+            name: "OrdalLinux",
+            dependencies: [.product(name: "OrdalCore", package: "swift")],
+            path: "Sources/OrdalLinux"
         ),
     ]
 )

@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// ⌘K: every action, fuzzy-searchable, keyboard only.

@@ -54,23 +54,117 @@ final class CanvasController {
         sync()
     }
 
-    /// The whole canvas as a PNG at 2x.
+    /// The whole canvas as a PNG.
     func pngData() -> Data? {
         guard let doc = scrollView?.documentView else { return nil }
         guard let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) else { return nil }
         doc.cacheDisplay(in: doc.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
+
+    /// For the snapshot checks: the hosting view that receives mouse events.
+    var documentView: NSView? { scrollView?.documentView }
+}
+
+/// What the canvas does with the mouse. All points are canvas coordinates.
+struct CanvasInteraction {
+    /// The card under a point and its top-left corner, if any.
+    var cardAt: (CGPoint) -> (name: String, origin: CGPoint)?
+    /// Points that SwiftUI should handle (the card's ⋮ menu).
+    var passThrough: (CGPoint, _ card: String, _ origin: CGPoint) -> Bool
+    var move: (_ card: String, _ origin: CGPoint, _ persist: Bool) -> Void
+    var clickCard: (_ card: String, _ clickCount: Int) -> Void
+    var clickBackground: () -> Void
+}
+
+/// Hosts the SwiftUI diagram and handles dragging in AppKit, where
+/// `convert(_:from:)` accounts for the scroll view's magnification exactly.
+/// Dragging a card moves it in the model on every event, so its connectors
+/// follow; dragging empty canvas pans.
+final class DiagramHostingView<Content: View>: NSHostingView<Content> {
+    var interaction: CanvasInteraction?
+
+    private enum Drag {
+        case card(name: String, grab: CGSize, startWindow: CGPoint, moved: Bool)
+        case pan(startWindow: CGPoint, startOrigin: CGPoint, moved: Bool)
+    }
+    private var drag: Drag?
+    /// Screen distance before a press becomes a drag.
+    private let threshold: CGFloat = 3
+
+    override func mouseDown(with event: NSEvent) {
+        guard let interaction else { return super.mouseDown(with: event) }
+        let p = convert(event.locationInWindow, from: nil)
+        if let (name, origin) = interaction.cardAt(p) {
+            if interaction.passThrough(p, name, origin) { return super.mouseDown(with: event) }
+            drag = .card(name: name, grab: CGSize(width: p.x - origin.x, height: p.y - origin.y),
+                         startWindow: event.locationInWindow, moved: false)
+        } else if let clip = enclosingScrollView?.contentView {
+            drag = .pan(startWindow: event.locationInWindow, startOrigin: clip.bounds.origin, moved: false)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let interaction, let current = drag else { return super.mouseDragged(with: event) }
+        switch current {
+        case let .card(name, grab, start, moved):
+            guard moved || distance(event.locationInWindow, start) >= threshold else { return }
+            if !moved { NSCursor.closedHand.push() }
+            drag = .card(name: name, grab: grab, startWindow: start, moved: true)
+            autoscroll(with: event)
+            let p = convert(event.locationInWindow, from: nil)
+            interaction.move(name, CGPoint(x: p.x - grab.width, y: p.y - grab.height), false)
+        case let .pan(start, startOrigin, moved):
+            guard moved || distance(event.locationInWindow, start) >= threshold,
+                  let scroll = enclosingScrollView else { return }
+            if !moved { NSCursor.closedHand.push() }
+            drag = .pan(startWindow: start, startOrigin: startOrigin, moved: true)
+            // Window points to canvas units; the window's y axis points up, the canvas's down.
+            let m = scroll.magnification
+            let dx = (event.locationInWindow.x - start.x) / m
+            let dy = (event.locationInWindow.y - start.y) / m
+            let doc = bounds.size, clip = scroll.contentView.bounds.size
+            let origin = CGPoint(x: min(max(0, startOrigin.x - dx), max(0, doc.width - clip.width)),
+                                 y: min(max(0, startOrigin.y + dy), max(0, doc.height - clip.height)))
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let interaction, let current = drag else { return super.mouseUp(with: event) }
+        drag = nil
+        switch current {
+        case let .card(name, grab, _, moved):
+            if moved {
+                NSCursor.pop()
+                let p = convert(event.locationInWindow, from: nil)
+                interaction.move(name, CGPoint(x: p.x - grab.width, y: p.y - grab.height), true)
+            } else {
+                interaction.clickCard(name, event.clickCount)
+            }
+        case let .pan(_, _, moved):
+            if moved { NSCursor.pop() } else { interaction.clickBackground() }
+        }
+    }
+
+    private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        hypot(a.x - b.x, a.y - b.y)
+    }
 }
 
 /// An `NSScrollView` with native trackpad panning and pinch / ⌘-scroll zoom
-/// around SwiftUI content, so text stays crisp at every zoom level.
+/// around SwiftUI content, so text stays crisp at every zoom level. The
+/// canvas always covers the whole viewport, whatever the zoom.
 struct ZoomableCanvas<Content: View>: NSViewRepresentable {
-    let size: CGSize
+    /// The size the content needs; the canvas grows to fill the viewport.
+    let contentSize: CGSize
     let controller: CanvasController
     /// Overrides the app's appearance for the canvas (nil = match the app).
     var appearance: NSAppearance? = nil
-    @ViewBuilder let content: () -> Content
+    let interaction: CanvasInteraction
+    /// Builds the content for the canvas's effective size.
+    let content: (CGSize) -> Content
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -80,41 +174,73 @@ struct ZoomableCanvas<Content: View>: NSViewRepresentable {
         scroll.allowsMagnification = true
         scroll.minMagnification = CanvasController.minZoom
         scroll.maxMagnification = CanvasController.maxZoom
-        scroll.drawsBackground = false
+        scroll.drawsBackground = true
+        scroll.backgroundColor = DiagramPalette.canvas
         scroll.appearance = appearance
-        let hosting = NSHostingView(rootView: content())
-        hosting.frame = CGRect(origin: .zero, size: size)
+        let hosting = DiagramHostingView(rootView: content(contentSize))
+        hosting.interaction = interaction
+        hosting.frame = CGRect(origin: .zero, size: contentSize)
         scroll.documentView = hosting
         scroll.contentView.postsBoundsChangedNotifications = true
+        scroll.postsFrameChangedNotifications = true
+        context.coordinator.parent = self
         context.coordinator.observe(scroll)
         controller.scrollView = scroll
-        DispatchQueue.main.async { controller.sync() }
+        DispatchQueue.main.async {
+            context.coordinator.layout(scroll)
+            controller.sync()
+        }
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let hosting = scroll.documentView as? NSHostingView<Content> else { return }
+        context.coordinator.parent = self
         if scroll.appearance != appearance { scroll.appearance = appearance }
-        hosting.rootView = content()
-        if hosting.frame.size != size { hosting.frame.size = size }
+        (scroll.documentView as? DiagramHostingView<Content>)?.interaction = interaction
         controller.scrollView = scroll
+        context.coordinator.layout(scroll)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(controller) }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     @MainActor
     final class Coordinator: NSObject {
-        let controller: CanvasController
+        var parent: ZoomableCanvas
         private var tokens: [NSObjectProtocol] = []
 
-        init(_ controller: CanvasController) { self.controller = controller }
+        init(_ parent: ZoomableCanvas) { self.parent = parent }
+
+        /// Sizes the document to cover the viewport (in canvas units, so
+        /// zooming out never shows anything but canvas) and re-renders it.
+        func layout(_ scroll: NSScrollView) {
+            guard let hosting = scroll.documentView as? DiagramHostingView<Content> else { return }
+            let clip = scroll.contentView.bounds.size
+            let size = CGSize(width: max(parent.contentSize.width, clip.width.rounded(.up)),
+                              height: max(parent.contentSize.height, clip.height.rounded(.up)))
+            if hosting.frame.size != size { hosting.frame.size = size }
+            hosting.rootView = parent.content(size)
+        }
 
         func observe(_ scroll: NSScrollView) {
             let center = NotificationCenter.default
-            for name in [NSView.boundsDidChangeNotification, NSScrollView.didEndLiveMagnifyNotification, NSScrollView.didLiveScrollNotification] {
-                let object: Any? = name == NSView.boundsDidChangeNotification ? scroll.contentView : scroll
-                tokens.append(center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.controller.sync() }
+            let sync = { [weak self, weak scroll] in
+                guard let self, let scroll else { return }
+                self.parent.controller.sync()
+                // Zoom or resize can expose area beyond the content: grow to cover it.
+                let clip = scroll.contentView.bounds.size
+                if let doc = scroll.documentView, clip.width > doc.frame.width + 0.5 || clip.height > doc.frame.height + 0.5 {
+                    self.layout(scroll)
+                }
+            }
+            let names: [(Notification.Name, Any?)] = [
+                (NSView.boundsDidChangeNotification, scroll.contentView),
+                (NSView.frameDidChangeNotification, scroll),
+                (NSScrollView.didEndLiveMagnifyNotification, scroll),
+                (NSScrollView.didLiveScrollNotification, scroll),
+            ]
+            for (name, object) in names {
+                tokens.append(center.addObserver(forName: name, object: object, queue: .main) { _ in
+                    MainActor.assumeIsolated { sync() }
                 })
             }
         }
@@ -123,4 +249,11 @@ struct ZoomableCanvas<Content: View>: NSViewRepresentable {
             tokens.forEach(NotificationCenter.default.removeObserver)
         }
     }
+}
+
+/// Colours shared by the canvas, its background and the scroll view, so the
+/// whole tab is one surface.
+enum DiagramPalette {
+    static let canvas = NSColor.windowBackgroundColor
+    static let dots = NSColor.tertiaryLabelColor.withAlphaComponent(0.6)
 }

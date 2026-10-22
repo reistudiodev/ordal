@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// Recent connections as cards, plus one field that takes a pasted URL.
@@ -10,7 +10,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: Space.l) {
             VStack(spacing: Space.s) {
-                Text("DB Client")
+                Text("Ordal")
                     .font(.largeTitle.weight(.semibold))
                 Text("PostgreSQL, MySQL, MariaDB, SQLite, MongoDB and Redis")
                     .foregroundStyle(.secondary)

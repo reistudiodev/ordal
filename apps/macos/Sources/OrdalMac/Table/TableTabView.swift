@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// Data first; Structure, DDL and a table-scoped Query as segments.
@@ -8,6 +8,9 @@ struct TableTabView: View {
     let workspace: WorkspaceModel
     @Environment(AppState.self) private var app
     @State private var reviewing = false
+    @AppStorage("mongoResultView") private var docMode: DocumentViewMode = .documents
+
+    private var showsDocuments: Bool { tab.pager.hasDocuments && docMode != .table }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,6 +21,9 @@ struct TableTabView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                if tab.segment == .data, tab.pager.hasDocuments {
+                    DocumentModePicker(mode: $docMode)
+                }
                 Spacer()
                 if tab.segment != .query {
                     Button {
@@ -71,6 +77,20 @@ struct TableTabView: View {
                 ContentUnavailableView("Could not load data", systemImage: "exclamationmark.triangle", description: Text(error))
             } else if pager.page == nil {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if showsDocuments {
+                DocumentList(
+                    count: pager.rowCount, mode: docMode, document: pager.document(at:), version: version,
+                    staged: { row in stagedFields(row) },
+                    onSelectField: { row, field in
+                        if let col = pager.columnIndex(of: field) {
+                            inspect(row: row, col: col)
+                            app.showInspector = true
+                        }
+                    }
+                )
+                .overlay(alignment: .top) {
+                    if pager.isLoading { ProgressView().controlSize(.small).padding(Space.s) }
+                }
             } else {
                 ResultGridView(
                     source: pager, version: version,
@@ -85,6 +105,16 @@ struct TableTabView: View {
             Divider()
             PaginationBar(pager: pager)
         }
+    }
+
+    /// Top-level fields of a row with staged edits, and their new values.
+    private func stagedFields(_ row: Int) -> [String: Value] {
+        guard !tab.pager.staged.isEmpty, let cells = tab.pager.row(at: row)?.cells else { return [:] }
+        var out: [String: Value] = [:]
+        for (i, col) in tab.pager.columns.enumerated() where i < cells.count && tab.pager.isStaged(row: row, column: i) {
+            out[col.name] = cells[i]
+        }
+        return out
     }
 
     private func inspect(row: Int, col: Int) {

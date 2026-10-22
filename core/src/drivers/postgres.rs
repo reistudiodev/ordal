@@ -46,7 +46,7 @@ impl PgDriver {
             .host(&config.host)
             .port(config.port)
             .username(&config.username)
-            .application_name(config.option("application_name").unwrap_or("dbclient"))
+            .application_name(config.option("application_name").unwrap_or("ordal"))
             .ssl_mode(match config.tls {
                 TlsMode::Disable => PgSslMode::Disable,
                 TlsMode::Prefer => PgSslMode::Prefer,

@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -99,12 +99,12 @@ struct SchemaDiagramView: View {
 
     private var canvas: some View {
         let size = tab.canvasSize
-        let canvasSize = CGSize(width: size.width, height: size.height)
+        let contentSize = CGSize(width: size.width, height: size.height)
         return ZStack(alignment: .bottom) {
-            ZoomableCanvas(size: canvasSize, controller: controller, appearance: canvasTheme.nsAppearance) {
-                DiagramContent(tab: tab, workspace: workspace, visible: controller.visibleRect, size: canvasSize)
+            ZoomableCanvas(contentSize: contentSize, controller: controller, appearance: canvasTheme.nsAppearance,
+                           interaction: interaction) { effective in
+                DiagramContent(tab: tab, workspace: workspace, visible: controller.visibleRect, size: effective)
             }
-            .background(Color(nsColor: .underPageBackgroundColor).opacity(0.35))
             HStack(alignment: .bottom) {
                 Spacer()
                 DiagramLegend()
@@ -112,7 +112,7 @@ struct SchemaDiagramView: View {
             }
             .padding(.bottom, Space.m)
             .allowsHitTesting(false)
-            Minimap(tab: tab, canvas: canvasSize, controller: controller)
+            Minimap(tab: tab, canvas: contentSize, controller: controller)
                 .padding(Space.m)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 .padding(.bottom, Space.xl)
@@ -124,6 +124,39 @@ struct SchemaDiagramView: View {
             didFit = true
             DispatchQueue.main.async { fitAll() }
         }
+    }
+
+    /// Mouse handling for the canvas (see `DiagramHostingView`).
+    private var interaction: CanvasInteraction {
+        CanvasInteraction(
+            cardAt: { p in
+                guard let name = tab.table(at: DiagramPoint(x: p.x, y: p.y)), let o = tab.positions[name] else { return nil }
+                return (name, CGPoint(x: o.x, y: o.y))
+            },
+            passThrough: { p, _, origin in
+                // The header's ⋮ menu belongs to SwiftUI.
+                p.x > origin.x + SchemaLayout.cardWidth - 32 && p.y < origin.y + SchemaLayout.headerHeight
+            },
+            move: { name, origin, persist in
+                tab.move(name, to: DiagramPoint(x: origin.x, y: origin.y), persist: persist)
+            },
+            clickCard: { name, count in
+                if count >= 2 {
+                    openTable(name)
+                } else {
+                    tab.selected = tab.selected == name ? nil : name
+                }
+            },
+            clickBackground: {
+                tab.selected = nil
+                tab.focusOnly = false
+            }
+        )
+    }
+
+    private func openTable(_ name: String) {
+        guard let table = tab.graph?.tables.first(where: { $0.name == name }) else { return }
+        workspace.openTable(path: table.path, kind: workspace.config.kind == .mongoDb ? .collection : .table)
     }
 
     private func fitAll() {
@@ -151,11 +184,12 @@ struct SchemaDiagramView: View {
     }
 }
 
-/// Everything inside the zoomable canvas: dots, edges, cards.
+/// Everything inside the zoomable canvas: background, dots, edges, cards.
 private struct DiagramContent: View {
     let tab: SchemaTabModel
     let workspace: WorkspaceModel
     let visible: CGRect
+    /// The canvas size, at least as large as the viewport.
     let size: CGSize
     /// Above this many tables, only cards near the viewport are built.
     static let cullAbove = 150
@@ -164,26 +198,55 @@ private struct DiagramContent: View {
         let _ = tab.version
         let tables = tab.visibleTables
         let shown = tables.count > Self.cullAbove ? tables.filter(isNearViewport) : tables
+        let foreignKeys = foreignKeysByTable
+        let focus = tab.focusOnly ? tab.selected : nil
         ZStack(alignment: .topLeading) {
-            Color(nsColor: .windowBackgroundColor)
-                .contentShape(Rectangle())
-                .onTapGesture { tab.selected = nil; tab.focusOnly = false }
-            DotGrid(size: size).allowsHitTesting(false)
-            EdgeLayer(tab: tab).frame(width: size.width, height: size.height)
+            Color(nsColor: DiagramPalette.canvas)
+            DotGrid(size: size)
+            EdgeLayer(edges: tab.edges, emphasis: tab.emphasis(of:))
+                .frame(width: size.width, height: size.height)
             ForEach(shown, id: \.name) { table in
                 TableCard(
-                    table: table, tab: tab,
-                    isForeignKey: { tab.isForeignKey(table: table.name, column: $0) },
-                    open: { workspace.openTable(path: table.path, kind: workspace.config.kind == .mongoDb ? .collection : .table) },
-                    newQuery: {
-                        let kind: NodeKind = workspace.config.kind == .mongoDb ? .collection : .table
-                        workspace.newQueryTab(text: workspace.starterQuery(path: table.path, kind: kind, detail: nil),
-                                              database: workspace.database(for: table.path))
-                    }
+                    table: table,
+                    position: tab.positions[table.name] ?? DiagramPoint(x: 0, y: 0),
+                    emphasis: tab.emphasis(ofTable: table.name),
+                    hoveredColumn: tab.hovered?.table == table.name ? tab.hovered?.column : nil,
+                    foreignKeys: foreignKeys[table.name] ?? [],
+                    references: tab.references(of: table.name),
+                    isFocusingThis: focus == table.name,
+                    actions: actions(for: table)
                 )
+                .equatable()
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private var foreignKeysByTable: [String: Set<String>] {
+        var out: [String: Set<String>] = [:]
+        for r in tab.graph?.relations ?? [] { out[r.fromTable, default: []].formUnion(r.fromColumns) }
+        return out
+    }
+
+    private func actions(for table: GraphTable) -> CardActions {
+        let kind: NodeKind = workspace.config.kind == .mongoDb ? .collection : .table
+        return CardActions(
+            open: { workspace.openTable(path: table.path, kind: kind) },
+            newQuery: {
+                workspace.newQueryTab(text: workspace.starterQuery(path: table.path, kind: kind, detail: nil),
+                                      database: workspace.database(for: table.path))
+            },
+            toggleFocus: {
+                if tab.focusOnly && tab.selected == table.name {
+                    tab.focusOnly = false
+                } else {
+                    tab.selected = table.name
+                    tab.focusOnly = true
+                }
+            },
+            hide: { tab.hide(table.name) },
+            hover: { column in tab.hovered = column.map { (table.name, $0) } }
+        )
     }
 
     private func isNearViewport(_ t: GraphTable) -> Bool {
@@ -195,7 +258,7 @@ private struct DiagramContent: View {
 
 /// A dot every 24 pt, in both appearances. A shape (not a `Canvas`) so the
 /// whole canvas renders, not only the part that was on screen.
-private struct DotGrid: View {
+private struct DotGrid: View, Equatable {
     let size: CGSize
 
     var body: some View {
@@ -210,33 +273,31 @@ private struct DotGrid: View {
                 y += 24
             }
         }
-        .fill(Color(nsColor: .tertiaryLabelColor).opacity(0.6))
+        .fill(Color(nsColor: DiagramPalette.dots))
         .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
 
-/// Right-angle connectors with rounded corners. Inferred relations are dashed.
-/// Drawn as shapes so edges outside the visible area render (and export) too.
+/// Right-angle connectors with rounded corners, grouped into a few shapes
+/// (by emphasis, solid or dashed) so a drag redraws a handful of paths, not
+/// one view per edge. Inferred relations are dashed.
 private struct EdgeLayer: View {
-    let tab: SchemaTabModel
+    let edges: [SchemaLayout.Edge]
+    let emphasis: (SchemaLayout.Edge) -> SchemaTabModel.Emphasis
 
     var body: some View {
-        let _ = tab.version
-        let edges = tab.edges
-        // Highlighted edges last, so they sit on top.
-        let ordered = edges.sorted { rank(tab.emphasis(of: $0)) < rank(tab.emphasis(of: $1)) }
+        let groups = Dictionary(grouping: edges) { Group(emphasis: emphasis($0), dashed: $0.inferred) }
         ZStack(alignment: .topLeading) {
-            ForEach(ordered) { e in
-                let emphasis = tab.emphasis(of: e)
-                let color = color(emphasis)
-                Self.rounded(e.points)
-                    .stroke(color, style: StrokeStyle(lineWidth: emphasis == .highlighted ? 2 : 1.2, lineCap: .round,
-                                                      lineJoin: .round, dash: e.inferred ? [5, 4] : []))
-                if let end = e.points.last, let start = e.points.first {
-                    // Referenced end: a dot. Referencing end: a short bar.
-                    Path(ellipseIn: CGRect(x: end.x - 3.5, y: end.y - 3.5, width: 7, height: 7)).fill(color)
-                    Path(CGRect(x: start.x - 1, y: start.y - 5, width: 2, height: 10)).fill(color)
+            // Dimmed first, highlighted last, so highlighted lines sit on top.
+            ForEach(Group.drawOrder, id: \.self) { g in
+                if let members = groups[g] {
+                    let color = Self.color(g.emphasis)
+                    EdgeLines(edges: members)
+                        .stroke(color, style: StrokeStyle(lineWidth: g.emphasis == .highlighted ? 2 : 1.2, lineCap: .round,
+                                                          lineJoin: .round, dash: g.dashed ? [5, 4] : []))
+                    EdgeEnds(edges: members).fill(color)
                 }
             }
         }
@@ -244,37 +305,59 @@ private struct EdgeLayer: View {
         .accessibilityHidden(true)
     }
 
-    private func rank(_ e: SchemaTabModel.Emphasis) -> Int {
-        switch e {
-        case .dimmed: 0
-        case .normal: 1
-        case .highlighted: 2
+    struct Group: Hashable {
+        let emphasis: SchemaTabModel.Emphasis
+        let dashed: Bool
+
+        static let drawOrder: [Group] = [SchemaTabModel.Emphasis.dimmed, .normal, .highlighted].flatMap { e in
+            [Group(emphasis: e, dashed: false), Group(emphasis: e, dashed: true)]
         }
     }
 
-    private func color(_ e: SchemaTabModel.Emphasis) -> Color {
+    static func color(_ e: SchemaTabModel.Emphasis) -> Color {
         switch e {
         case .highlighted: .accentColor
         case .dimmed: Color(nsColor: .tertiaryLabelColor).opacity(0.35)
         case .normal: Color(nsColor: .secondaryLabelColor).opacity(0.7)
         }
     }
+}
 
-    /// A polyline whose corners are rounded with a 6 pt radius.
-    static func rounded(_ points: [DiagramPoint]) -> Path {
+/// Every polyline of a group in one path, corners rounded with a 6 pt radius.
+private struct EdgeLines: Shape {
+    let edges: [SchemaLayout.Edge]
+
+    func path(in _: CGRect) -> Path {
         var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: CGPoint(x: first.x, y: first.y))
-        for i in 1..<points.count {
-            let p = CGPoint(x: points[i].x, y: points[i].y)
-            if i < points.count - 1 {
-                let next = CGPoint(x: points[i + 1].x, y: points[i + 1].y)
-                let prev = CGPoint(x: points[i - 1].x, y: points[i - 1].y)
-                let r = min(6, hypot(p.x - prev.x, p.y - prev.y) / 2, hypot(next.x - p.x, next.y - p.y) / 2)
-                path.addArc(tangent1End: p, tangent2End: next, radius: r)
-            } else {
-                path.addLine(to: p)
+        for e in edges {
+            guard let first = e.points.first else { continue }
+            path.move(to: CGPoint(x: first.x, y: first.y))
+            for i in 1..<e.points.count {
+                let p = CGPoint(x: e.points[i].x, y: e.points[i].y)
+                if i < e.points.count - 1 {
+                    let next = CGPoint(x: e.points[i + 1].x, y: e.points[i + 1].y)
+                    let prev = CGPoint(x: e.points[i - 1].x, y: e.points[i - 1].y)
+                    let r = min(6, hypot(p.x - prev.x, p.y - prev.y) / 2, hypot(next.x - p.x, next.y - p.y) / 2)
+                    path.addArc(tangent1End: p, tangent2End: next, radius: r)
+                } else {
+                    path.addLine(to: p)
+                }
             }
+        }
+        return path
+    }
+}
+
+/// End markers: a dot at the referenced column, a short bar at the referencing one.
+private struct EdgeEnds: Shape {
+    let edges: [SchemaLayout.Edge]
+
+    func path(in _: CGRect) -> Path {
+        var path = Path()
+        for e in edges {
+            guard let start = e.points.first, let end = e.points.last else { continue }
+            path.addEllipse(in: CGRect(x: end.x - 3.5, y: end.y - 3.5, width: 7, height: 7))
+            path.addRect(CGRect(x: start.x - 1, y: start.y - 5, width: 2, height: 10))
         }
         return path
     }

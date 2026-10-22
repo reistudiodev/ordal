@@ -92,7 +92,7 @@ impl MongoDriver {
         if config.option("directConnection") == Some("true") {
             opts.direct_connection = Some(true);
         }
-        opts.app_name = Some("dbclient".into());
+        opts.app_name = Some("ordal".into());
         opts.server_selection_timeout = Some(Duration::from_secs(10));
         opts.connect_timeout = Some(Duration::from_secs(10));
 
@@ -281,8 +281,10 @@ fn document_column() -> Vec<ColumnInfo> {
     vec![ColumnInfo { name: "document".into(), type_name: "document".into(), kind: ValueKind::Json }]
 }
 
+/// Query results carry canonical Extended JSON so the document view can
+/// show exact BSON types.
 fn doc_row(d: Document) -> Row {
-    Row { cells: vec![Value::Json { v: Bson::Document(d).into_relaxed_extjson().to_string() }] }
+    Row { cells: vec![Value::Json { v: Bson::Document(d).into_canonical_extjson().to_string() }] }
 }
 
 fn sub_doc(cmd: &Document, key: &str) -> Result<Option<Document>> {
@@ -499,6 +501,8 @@ impl Driver for MongoDriver {
             rows,
             edit_keys: if self.read_only { Vec::new() } else { keys.clone() },
             paging_keys: keys,
+            // Canonical form keeps the exact BSON type (Int32 vs Int64 vs Double).
+            documents: docs.into_iter().map(|d| Bson::Document(d).into_canonical_extjson().to_string()).collect(),
         };
         Ok(assemble(fetched, cursor, size as usize, sort.is_none()))
     }

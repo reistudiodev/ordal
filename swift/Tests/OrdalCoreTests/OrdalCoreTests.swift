@@ -1,8 +1,8 @@
 import Foundation
 import XCTest
-@testable import DBClientCore
+@testable import OrdalCore
 
-final class DBClientCoreTests: XCTestCase {
+final class OrdalCoreTests: XCTestCase {
     private var dir: URL!
 
     override func setUpWithError() throws {

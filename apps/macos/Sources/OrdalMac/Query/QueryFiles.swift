@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import UniformTypeIdentifiers
 
 /// Save and open query files with the standard panels, so you choose the folder.

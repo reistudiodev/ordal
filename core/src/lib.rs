@@ -1,4 +1,4 @@
-//! dbclient-core: everything that is not UI lives here.
+//! ordal-core: everything that is not UI lives here.
 //!
 //! The Swift apps on macOS, Windows and Linux talk to this crate only through
 //! the UniFFI-generated bindings, so anything marked `#[uniffi::export]`
@@ -15,6 +15,7 @@ mod drivers;
 mod error;
 mod history;
 mod manager;
+mod migrate;
 mod runtime;
 mod secrets;
 mod session;

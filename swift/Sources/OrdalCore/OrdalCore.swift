@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(DBClientCoreFFI)
-import DBClientCoreFFI
+#if canImport(OrdalCoreFFI)
+import OrdalCoreFFI
 #endif
 
 fileprivate extension RustBuffer {
@@ -25,13 +25,13 @@ fileprivate extension RustBuffer {
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
-        try! rustCall { ffi_dbclient_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
+        try! rustCall { ffi_ordal_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
     func deallocate() {
-        try! rustCall { ffi_dbclient_core_rustbuffer_free(self, $0) }
+        try! rustCall { ffi_ordal_core_rustbuffer_free(self, $0) }
     }
 }
 
@@ -327,7 +327,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureDbclientCoreInitialized()
+    uniffiEnsureOrdalCoreInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -705,7 +705,7 @@ open class ConnectionManager: ConnectionManagerProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_dbclient_core_fn_clone_connectionmanager(self.handle, $0) }
+        return try! rustCall { uniffi_ordal_core_fn_clone_connectionmanager(self.handle, $0) }
     }
     /**
      * Uses the platform's config/data directories and the OS keychain.
@@ -714,7 +714,7 @@ public convenience init()throws  {
     let handle =
         try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_constructor_connectionmanager_new(uniffiCallStatus
+    uniffi_ordal_core_fn_constructor_connectionmanager_new(uniffiCallStatus
     )
 }
     self.init(unsafeFromHandle: handle)
@@ -726,7 +726,7 @@ public convenience init()throws  {
             return
         }
 
-        try! rustCall { uniffi_dbclient_core_fn_free_connectionmanager(handle, $0) }
+        try! rustCall { uniffi_ordal_core_fn_free_connectionmanager(handle, $0) }
     }
 
     
@@ -737,7 +737,7 @@ public convenience init()throws  {
 public static func withDirectory(dir: String, useKeychain: Bool)throws  -> ConnectionManager  {
     return try  FfiConverterTypeConnectionManager_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_constructor_connectionmanager_with_directory(
+    uniffi_ordal_core_fn_constructor_connectionmanager_with_directory(
         FfiConverterString.lower(dir),
         FfiConverterBool.lower(useKeychain),uniffiCallStatus
     )
@@ -748,7 +748,7 @@ public static func withDirectory(dir: String, useKeychain: Bool)throws  -> Conne
     
 open func addHistory(id: String, entry: HistoryEntry)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_add_history(
+    uniffi_ordal_core_fn_method_connectionmanager_add_history(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterTypeHistoryEntry_lower(entry),uniffiCallStatus
@@ -761,7 +761,7 @@ open func addHistory(id: String, entry: HistoryEntry)throws   {try rustCallWithE
      */
 open func delete(id: String)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_delete(
+    uniffi_ordal_core_fn_method_connectionmanager_delete(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -771,7 +771,7 @@ open func delete(id: String)throws   {try rustCallWithError(FfiConverterTypeCore
 open func get(id: String) -> ConnectionConfig?  {
     return try!  FfiConverterOptionTypeConnectionConfig.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_get(
+    uniffi_ordal_core_fn_method_connectionmanager_get(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -781,7 +781,7 @@ open func get(id: String) -> ConnectionConfig?  {
 open func hasPassword(id: String)throws  -> Bool  {
     return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_has_password(
+    uniffi_ordal_core_fn_method_connectionmanager_has_password(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -794,7 +794,7 @@ open func hasPassword(id: String)throws  -> Bool  {
 open func history(id: String, limit: UInt32)throws  -> [HistoryEntry]  {
     return try  FfiConverterSequenceTypeHistoryEntry.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_history(
+    uniffi_ordal_core_fn_method_connectionmanager_history(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterUInt32.lower(limit),uniffiCallStatus
@@ -805,7 +805,7 @@ open func history(id: String, limit: UInt32)throws  -> [HistoryEntry]  {
 open func list() -> [ConnectionConfig]  {
     return try!  FfiConverterSequenceTypeConnectionConfig.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_list(
+    uniffi_ordal_core_fn_method_connectionmanager_list(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -815,13 +815,13 @@ open func `open`(id: String)async throws  -> Session  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_connectionmanager_open(
+                uniffi_ordal_core_fn_method_connectionmanager_open(
                         self.uniffiCloneHandle(),FfiConverterString.lower(id)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_u64,
-            completeFunc: ffi_dbclient_core_rust_future_complete_u64,
-            freeFunc: ffi_dbclient_core_rust_future_free_u64,
+            pollFunc: ffi_ordal_core_rust_future_poll_u64,
+            completeFunc: ffi_ordal_core_rust_future_complete_u64,
+            freeFunc: ffi_ordal_core_rust_future_free_u64,
             liftFunc: FfiConverterTypeSession_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -834,7 +834,7 @@ open func `open`(id: String)async throws  -> Session  {
 open func save(config: ConnectionConfig, password: String?)throws  -> ConnectionConfig  {
     return try  FfiConverterTypeConnectionConfig_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_connectionmanager_save(
+    uniffi_ordal_core_fn_method_connectionmanager_save(
             self.uniffiCloneHandle(),
         FfiConverterTypeConnectionConfig_lower(config),
         FfiConverterOptionString.lower(password),uniffiCallStatus
@@ -850,13 +850,13 @@ open func test(config: ConnectionConfig, password: String?)async throws  -> Serv
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_connectionmanager_test(
+                uniffi_ordal_core_fn_method_connectionmanager_test(
                         self.uniffiCloneHandle(),FfiConverterTypeConnectionConfig_lower(config),FfiConverterOptionString.lower(password)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeServerInfo_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -987,7 +987,7 @@ open class QueryCursor: QueryCursorProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_dbclient_core_fn_clone_querycursor(self.handle, $0) }
+        return try! rustCall { uniffi_ordal_core_fn_clone_querycursor(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -997,7 +997,7 @@ open class QueryCursor: QueryCursorProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_dbclient_core_fn_free_querycursor(handle, $0) }
+        try! rustCall { uniffi_ordal_core_fn_free_querycursor(handle, $0) }
     }
 
     
@@ -1008,7 +1008,7 @@ open class QueryCursor: QueryCursorProtocol, @unchecked Sendable {
      */
 open func cancel()  {try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_querycursor_cancel(
+    uniffi_ordal_core_fn_method_querycursor_cancel(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 }
@@ -1022,13 +1022,13 @@ open func columns()async throws  -> [ColumnInfo]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_querycursor_columns(
+                uniffi_ordal_core_fn_method_querycursor_columns(
                         self.uniffiCloneHandle()
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeColumnInfo.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1040,7 +1040,7 @@ open func columns()async throws  -> [ColumnInfo]  {
 open func elapsedMs() -> UInt64  {
     return try!  FfiConverterUInt64.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_querycursor_elapsed_ms(
+    uniffi_ordal_core_fn_method_querycursor_elapsed_ms(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1049,7 +1049,7 @@ open func elapsedMs() -> UInt64  {
 open func isDone() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_querycursor_is_done(
+    uniffi_ordal_core_fn_method_querycursor_is_done(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1063,13 +1063,13 @@ open func nextPage(maxRows: UInt32)async throws  -> Page  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_querycursor_next_page(
+                uniffi_ordal_core_fn_method_querycursor_next_page(
                         self.uniffiCloneHandle(),FfiConverterUInt32.lower(maxRows)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypePage_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1081,7 +1081,7 @@ open func nextPage(maxRows: UInt32)async throws  -> Page  {
 open func rowsAffected() -> UInt64?  {
     return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_querycursor_rows_affected(
+    uniffi_ordal_core_fn_method_querycursor_rows_affected(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1247,7 +1247,7 @@ open class Session: SessionProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_dbclient_core_fn_clone_session(self.handle, $0) }
+        return try! rustCall { uniffi_ordal_core_fn_clone_session(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -1257,7 +1257,7 @@ open class Session: SessionProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_dbclient_core_fn_free_session(handle, $0) }
+        try! rustCall { uniffi_ordal_core_fn_free_session(handle, $0) }
     }
 
     
@@ -1270,13 +1270,13 @@ open func applyEdits(path: [String], edits: [CellEdit])async throws  -> UInt64  
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_apply_edits(
+                uniffi_ordal_core_fn_method_session_apply_edits(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterSequenceTypeCellEdit.lower(edits)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_u64,
-            completeFunc: ffi_dbclient_core_rust_future_complete_u64,
-            freeFunc: ffi_dbclient_core_rust_future_free_u64,
+            pollFunc: ffi_ordal_core_rust_future_poll_u64,
+            completeFunc: ffi_ordal_core_rust_future_complete_u64,
+            freeFunc: ffi_ordal_core_rust_future_free_u64,
             liftFunc: FfiConverterUInt64.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1288,7 +1288,7 @@ open func applyEdits(path: [String], edits: [CellEdit])async throws  -> UInt64  
 open func classify(query: String) -> StatementKind  {
     return try!  FfiConverterTypeStatementKind_lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_session_classify(
+    uniffi_ordal_core_fn_method_session_classify(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(query),uniffiCallStatus
     )
@@ -1299,13 +1299,13 @@ open func close()async   {
     return
         try!  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_close(
+                uniffi_ordal_core_fn_method_session_close(
                         self.uniffiCloneHandle()
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_void,
-            completeFunc: ffi_dbclient_core_rust_future_complete_void,
-            freeFunc: ffi_dbclient_core_rust_future_free_void,
+            pollFunc: ffi_ordal_core_rust_future_poll_void,
+            completeFunc: ffi_ordal_core_rust_future_complete_void,
+            freeFunc: ffi_ordal_core_rust_future_free_void,
             liftFunc: { $0 },
             errorHandler: nil
             
@@ -1315,7 +1315,7 @@ open func close()async   {
 open func config() -> ConnectionConfig  {
     return try!  FfiConverterTypeConnectionConfig_lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_session_config(
+    uniffi_ordal_core_fn_method_session_config(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1328,13 +1328,13 @@ open func fetchPage(path: [String], cursor: PageCursor, size: UInt32, sort: Sort
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_fetch_page(
+                uniffi_ordal_core_fn_method_session_fetch_page(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterTypePageCursor_lower(cursor),FfiConverterUInt32.lower(size),FfiConverterOptionTypeSortSpec.lower(sort)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeTablePage_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1347,13 +1347,13 @@ open func keyInfo(path: [String])async throws  -> KeyInfo  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_key_info(
+                uniffi_ordal_core_fn_method_session_key_info(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeKeyInfo_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1366,13 +1366,13 @@ open func listChildren(path: [String])async throws  -> [BrowseNode]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_list_children(
+                uniffi_ordal_core_fn_method_session_list_children(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeBrowseNode.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1385,13 +1385,13 @@ open func ping()async throws  -> Double  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_ping(
+                uniffi_ordal_core_fn_method_session_ping(
                         self.uniffiCloneHandle()
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_f64,
-            completeFunc: ffi_dbclient_core_rust_future_complete_f64,
-            freeFunc: ffi_dbclient_core_rust_future_free_f64,
+            pollFunc: ffi_ordal_core_rust_future_poll_f64,
+            completeFunc: ffi_ordal_core_rust_future_complete_f64,
+            freeFunc: ffi_ordal_core_rust_future_free_f64,
             liftFunc: FfiConverterDouble.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1404,13 +1404,13 @@ open func previewEdits(path: [String], edits: [CellEdit])async throws  -> [Strin
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_preview_edits(
+                uniffi_ordal_core_fn_method_session_preview_edits(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterSequenceTypeCellEdit.lower(edits)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceString.lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1423,7 +1423,7 @@ open func previewEdits(path: [String], edits: [CellEdit])async throws  -> [Strin
 open func query(query: String, database: String?)throws  -> QueryCursor  {
     return try  FfiConverterTypeQueryCursor_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_session_query(
+    uniffi_ordal_core_fn_method_session_query(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(query),
         FfiConverterOptionString.lower(database),uniffiCallStatus
@@ -1434,7 +1434,7 @@ open func query(query: String, database: String?)throws  -> QueryCursor  {
 open func readOnly() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_method_session_read_only(
+    uniffi_ordal_core_fn_method_session_read_only(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1447,13 +1447,13 @@ open func rowCount(path: [String], exact: Bool)async throws  -> RowCount  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_row_count(
+                uniffi_ordal_core_fn_method_session_row_count(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterBool.lower(exact)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeRowCount_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1466,13 +1466,13 @@ open func schemaGraph(path: [String])async throws  -> SchemaGraph  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_schema_graph(
+                uniffi_ordal_core_fn_method_session_schema_graph(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeSchemaGraph_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1482,13 +1482,13 @@ open func serverInfo()async throws  -> ServerInfo  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_server_info(
+                uniffi_ordal_core_fn_method_session_server_info(
                         self.uniffiCloneHandle()
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeServerInfo_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -1501,13 +1501,13 @@ open func tableMeta(path: [String])async throws  -> TableMeta  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_table_meta(
+                uniffi_ordal_core_fn_method_session_table_meta(
                         self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
                 )
             },
-            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
-            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
-            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            pollFunc: ffi_ordal_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ordal_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ordal_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeTableMeta_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
@@ -2879,6 +2879,11 @@ public struct TablePage: Equatable, Hashable {
      * Offset of the first row, when known (first page, OFFSET jumps).
      */
     public var offset: UInt64?
+    /**
+     * Document stores: each row's whole document as Extended JSON, with the
+     * stored field order. Empty for SQL tables.
+     */
+    public var documents: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2892,7 +2897,11 @@ public struct TablePage: Equatable, Hashable {
          */firstKey: [Value]?, lastKey: [Value]?, hasPrev: Bool, hasNext: Bool, 
         /**
          * Offset of the first row, when known (first page, OFFSET jumps).
-         */offset: UInt64?) {
+         */offset: UInt64?, 
+        /**
+         * Document stores: each row's whole document as Extended JSON, with the
+         * stored field order. Empty for SQL tables.
+         */documents: [String]) {
         self.columns = columns
         self.rows = rows
         self.rowKeys = rowKeys
@@ -2901,6 +2910,7 @@ public struct TablePage: Equatable, Hashable {
         self.hasPrev = hasPrev
         self.hasNext = hasNext
         self.offset = offset
+        self.documents = documents
     }
 
     
@@ -2926,7 +2936,8 @@ public struct FfiConverterTypeTablePage: FfiConverterRustBuffer {
                 lastKey: FfiConverterOptionSequenceTypeValue.read(from: &buf), 
                 hasPrev: FfiConverterBool.read(from: &buf), 
                 hasNext: FfiConverterBool.read(from: &buf), 
-                offset: FfiConverterOptionUInt64.read(from: &buf)
+                offset: FfiConverterOptionUInt64.read(from: &buf), 
+                documents: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -2939,6 +2950,7 @@ public struct FfiConverterTypeTablePage: FfiConverterRustBuffer {
         FfiConverterBool.write(value.hasPrev, into: &buf)
         FfiConverterBool.write(value.hasNext, into: &buf)
         FfiConverterOptionUInt64.write(value.offset, into: &buf)
+        FfiConverterSequenceString.write(value.documents, into: &buf)
     }
 }
 
@@ -4702,7 +4714,7 @@ fileprivate func uniffiRustCallAsync<F, T>(
 ) async throws -> T {
     // Make sure to call the ensure init function since future creation doesn't have a
     // RustCallStatus param, so doesn't use makeRustCall()
-    uniffiEnsureDbclientCoreInitialized()
+    uniffiEnsureOrdalCoreInitialized()
     let rustFuture = rustFutureFunc()
     defer {
         freeFunc(rustFuture)
@@ -4741,7 +4753,7 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
 public func coreVersion() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_func_core_version(uniffiCallStatus
+    uniffi_ordal_core_fn_func_core_version(uniffiCallStatus
     )
 })
 }
@@ -4752,7 +4764,7 @@ public func coreVersion() -> String  {
 public func parseConnectionUrl(url: String)throws  -> ParsedConnection  {
     return try  FfiConverterTypeParsedConnection_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_func_parse_connection_url(
+    uniffi_ordal_core_fn_func_parse_connection_url(
         FfiConverterString.lower(url),uniffiCallStatus
     )
 })
@@ -4763,7 +4775,7 @@ public func parseConnectionUrl(url: String)throws  -> ParsedConnection  {
 public func classifyStatement(sql: String) -> StatementKind  {
     return try!  FfiConverterTypeStatementKind_lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_dbclient_core_fn_func_classify_statement(
+    uniffi_ordal_core_fn_func_classify_statement(
         FfiConverterString.lower(sql),uniffiCallStatus
     )
 })
@@ -4780,113 +4792,113 @@ private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
-    let scaffolding_contract_version = ffi_dbclient_core_uniffi_contract_version()
+    let scaffolding_contract_version = ffi_ordal_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_dbclient_core_checksum_func_core_version() != 1312) {
+    if (uniffi_ordal_core_checksum_func_core_version() != 454) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_func_parse_connection_url() != 10760) {
+    if (uniffi_ordal_core_checksum_func_parse_connection_url() != 15002) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_func_classify_statement() != 59610) {
+    if (uniffi_ordal_core_checksum_func_classify_statement() != 52071) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_add_history() != 15838) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_add_history() != 14707) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_delete() != 28089) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_delete() != 56272) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_get() != 13707) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_get() != 11050) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_has_password() != 61153) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_has_password() != 27135) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_history() != 13874) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_history() != 16925) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_list() != 27293) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_list() != 35302) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_open() != 51598) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_open() != 16579) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_save() != 24109) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_save() != 55193) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_connectionmanager_test() != 47379) {
+    if (uniffi_ordal_core_checksum_method_connectionmanager_test() != 21173) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_cancel() != 64552) {
+    if (uniffi_ordal_core_checksum_method_querycursor_cancel() != 10983) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_columns() != 46269) {
+    if (uniffi_ordal_core_checksum_method_querycursor_columns() != 35264) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_elapsed_ms() != 55372) {
+    if (uniffi_ordal_core_checksum_method_querycursor_elapsed_ms() != 45689) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_is_done() != 6257) {
+    if (uniffi_ordal_core_checksum_method_querycursor_is_done() != 12717) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_next_page() != 45067) {
+    if (uniffi_ordal_core_checksum_method_querycursor_next_page() != 34231) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_querycursor_rows_affected() != 28816) {
+    if (uniffi_ordal_core_checksum_method_querycursor_rows_affected() != 36990) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_apply_edits() != 48891) {
+    if (uniffi_ordal_core_checksum_method_session_apply_edits() != 40801) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_classify() != 40681) {
+    if (uniffi_ordal_core_checksum_method_session_classify() != 18701) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_close() != 17436) {
+    if (uniffi_ordal_core_checksum_method_session_close() != 28603) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_config() != 48917) {
+    if (uniffi_ordal_core_checksum_method_session_config() != 56308) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_fetch_page() != 59184) {
+    if (uniffi_ordal_core_checksum_method_session_fetch_page() != 63374) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_key_info() != 7508) {
+    if (uniffi_ordal_core_checksum_method_session_key_info() != 1310) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_list_children() != 64244) {
+    if (uniffi_ordal_core_checksum_method_session_list_children() != 22203) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_ping() != 1188) {
+    if (uniffi_ordal_core_checksum_method_session_ping() != 9042) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_preview_edits() != 12876) {
+    if (uniffi_ordal_core_checksum_method_session_preview_edits() != 4351) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_query() != 19387) {
+    if (uniffi_ordal_core_checksum_method_session_query() != 14382) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_read_only() != 22680) {
+    if (uniffi_ordal_core_checksum_method_session_read_only() != 2185) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_row_count() != 28777) {
+    if (uniffi_ordal_core_checksum_method_session_row_count() != 41803) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_schema_graph() != 35266) {
+    if (uniffi_ordal_core_checksum_method_session_schema_graph() != 4535) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_server_info() != 38716) {
+    if (uniffi_ordal_core_checksum_method_session_server_info() != 32732) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_table_meta() != 4362) {
+    if (uniffi_ordal_core_checksum_method_session_table_meta() != 46131) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_constructor_connectionmanager_new() != 14515) {
+    if (uniffi_ordal_core_checksum_constructor_connectionmanager_new() != 58083) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_constructor_connectionmanager_with_directory() != 52283) {
+    if (uniffi_ordal_core_checksum_constructor_connectionmanager_with_directory() != 46989) {
         return InitializationResult.apiChecksumMismatch
     }
 
@@ -4895,7 +4907,7 @@ private let initializationResult: InitializationResult = {
 
 // Make the ensure init function public so that other modules which have external type references to
 // our types can call it.
-public func uniffiEnsureDbclientCoreInitialized() {
+public func uniffiEnsureOrdalCoreInitialized() {
     switch initializationResult {
     case .ok:
         break

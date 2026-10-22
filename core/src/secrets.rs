@@ -7,7 +7,6 @@ use std::sync::Mutex;
 
 use crate::error::{CoreError, Result};
 
-const SERVICE: &str = "dbclient";
 
 pub(crate) trait SecretStore: Send + Sync {
     fn get(&self, id: &str) -> Result<Option<String>>;
@@ -15,8 +14,22 @@ pub(crate) trait SecretStore: Send + Sync {
     fn delete(&self, id: &str) -> Result<()>;
 }
 
-/// The real OS credential store.
-pub(crate) struct Keychain;
+/// The real OS credential store, for one service name.
+pub(crate) struct Keychain {
+    service: &'static str,
+}
+
+impl Keychain {
+    /// Where Ordal keeps passwords.
+    pub(crate) fn current() -> Self {
+        Self { service: "ordal" }
+    }
+
+    /// Where the app kept them before it was renamed (read once by `migrate`).
+    pub(crate) fn legacy() -> Self {
+        Self { service: crate::migrate::LEGACY_NAME }
+    }
+}
 
 fn keychain_error(e: keyring::Error) -> CoreError {
     CoreError::Secret { message: e.to_string() }
@@ -24,7 +37,7 @@ fn keychain_error(e: keyring::Error) -> CoreError {
 
 impl SecretStore for Keychain {
     fn get(&self, id: &str) -> Result<Option<String>> {
-        let entry = keyring::Entry::new(SERVICE, id).map_err(keychain_error)?;
+        let entry = keyring::Entry::new(self.service, id).map_err(keychain_error)?;
         match entry.get_password() {
             Ok(p) => Ok(Some(p)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -33,12 +46,12 @@ impl SecretStore for Keychain {
     }
 
     fn set(&self, id: &str, secret: &str) -> Result<()> {
-        let entry = keyring::Entry::new(SERVICE, id).map_err(keychain_error)?;
+        let entry = keyring::Entry::new(self.service, id).map_err(keychain_error)?;
         entry.set_password(secret).map_err(keychain_error)
     }
 
     fn delete(&self, id: &str) -> Result<()> {
-        let entry = keyring::Entry::new(SERVICE, id).map_err(keychain_error)?;
+        let entry = keyring::Entry::new(self.service, id).map_err(keychain_error)?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(keychain_error(e)),

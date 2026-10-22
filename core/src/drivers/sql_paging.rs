@@ -58,17 +58,17 @@ impl Dialect {
     }
 }
 
-const TABLE_ALIAS: &str = "__dbclient_t";
+const TABLE_ALIAS: &str = "__ordal_t";
 
 /// The hidden columns a page query adds in front of `*`: the sort value
 /// (if sorted) then each key, aliased so they can be stripped again.
 pub(crate) fn hidden_select(d: Dialect, sort: Option<&KeyCol>, keys: &[KeyCol]) -> (String, usize) {
     let mut parts = Vec::new();
     if let Some(s) = sort {
-        parts.push(format!("{} AS {}", s.expr, d.ident("__dbclient_s")));
+        parts.push(format!("{} AS {}", s.expr, d.ident("__ordal_s")));
     }
     for (i, k) in keys.iter().enumerate() {
-        parts.push(format!("{} AS {}", k.expr, d.ident(&format!("__dbclient_k{i}"))));
+        parts.push(format!("{} AS {}", k.expr, d.ident(&format!("__ordal_k{i}"))));
     }
     let n = parts.len();
     // MySQL only allows `*` first, so take the row as `alias.*`.
@@ -217,7 +217,7 @@ pub(crate) fn split_hidden(w: Window, hidden: usize, sorted: bool, keys_edit_row
         rows.push(crate::value::Row { cells: visible });
     }
     let columns = w.columns.into_iter().skip(hidden).collect();
-    Fetched { columns, rows, paging_keys, edit_keys }
+    Fetched { columns, rows, paging_keys, edit_keys, documents: Vec::new() }
 }
 
 /// One `UPDATE … SET col = value WHERE key = …` per edit, with typed literals.
@@ -271,7 +271,7 @@ mod tests {
         let (sql, hidden) = page_sql(Dialect::Postgres, "\"t\"", &id(), None, &PageCursor::First, 100).unwrap();
         assert_eq!(
             sql,
-            "SELECT \"id\" AS \"__dbclient_k0\", \"__dbclient_t\".* FROM \"t\" AS \"__dbclient_t\" ORDER BY \"id\" ASC LIMIT 101"
+            "SELECT \"id\" AS \"__ordal_k0\", \"__ordal_t\".* FROM \"t\" AS \"__ordal_t\" ORDER BY \"id\" ASC LIMIT 101"
         );
         assert_eq!(hidden, 1);
         let after = PageCursor::After { key: vec![Value::Int { v: 100 }] };
@@ -321,7 +321,7 @@ mod tests {
         let after = PageCursor::After { key: vec![] };
         assert!(page_sql(Dialect::MySql, "`t`", &[], None, &after, 10).is_err());
         let (sql, _) = page_sql(Dialect::MySql, "`t`", &[], None, &PageCursor::Offset { offset: 20 }, 10).unwrap();
-        assert_eq!(sql, "SELECT `__dbclient_t`.* FROM `t` AS `__dbclient_t` LIMIT 11 OFFSET 20");
+        assert_eq!(sql, "SELECT `__ordal_t`.* FROM `t` AS `__ordal_t` LIMIT 11 OFFSET 20");
     }
 
     #[test]

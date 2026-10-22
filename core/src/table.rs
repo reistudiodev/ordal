@@ -41,6 +41,9 @@ pub struct TablePage {
     pub has_next: bool,
     /// Offset of the first row, when known (first page, OFFSET jumps).
     pub offset: Option<u64>,
+    /// Document stores: each row's whole document as Extended JSON, with the
+    /// stored field order. Empty for SQL tables.
+    pub documents: Vec<String>,
 }
 
 /// How a table's pages are addressed.
@@ -143,6 +146,8 @@ pub(crate) struct Fetched {
     pub rows: Vec<Row>,
     pub paging_keys: Vec<Vec<Value>>,
     pub edit_keys: Vec<Vec<Value>>,
+    /// Whole documents (document stores only), in row order.
+    pub documents: Vec<String>,
 }
 
 impl PageCursor {
@@ -158,10 +163,12 @@ pub(crate) fn assemble(mut f: Fetched, cursor: &PageCursor, size: usize, keyset:
     f.rows.truncate(size);
     f.paging_keys.truncate(size);
     f.edit_keys.truncate(size);
+    f.documents.truncate(size);
     if cursor.descending() {
         f.rows.reverse();
         f.paging_keys.reverse();
         f.edit_keys.reverse();
+        f.documents.reverse();
     }
     let (has_prev, has_next) = match cursor {
         PageCursor::First => (false, extra),
@@ -181,6 +188,7 @@ pub(crate) fn assemble(mut f: Fetched, cursor: &PageCursor, size: usize, keyset:
         last_key: keyset.then(|| f.paging_keys.last().cloned()).flatten(),
         rows: f.rows,
         row_keys: f.edit_keys,
+        documents: f.documents,
         has_prev,
         has_next,
         offset,
@@ -252,6 +260,7 @@ mod tests {
             rows: ids.iter().map(|&i| row(i)).collect(),
             paging_keys: ids.iter().map(|&i| vec![Value::Int { v: i }]).collect(),
             edit_keys: ids.iter().map(|&i| vec![Value::Int { v: i }]).collect(),
+            documents: ids.iter().map(|i| format!("{{\"_id\": {i}}}")).collect(),
         }
     }
 
@@ -275,6 +284,7 @@ mod tests {
         assert!(p.has_prev && !p.has_next);
         assert_eq!(p.first_key, Some(vec![Value::Int { v: 9 }]));
         assert_eq!(p.row_keys[0], vec![Value::Int { v: 9 }]);
+        assert_eq!(p.documents, vec!["{\"_id\": 9}", "{\"_id\": 10}"]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// Rail + browser on the left, tabs in the centre, inspector on the right,

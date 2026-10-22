@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "DBClientMac",
+    name: "OrdalMac",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(path: "../../swift"),
     ],
     targets: [
         .executableTarget(
-            name: "DBClientMac",
+            name: "OrdalMac",
             dependencies: [
-                .product(name: "DBClientCore", package: "swift"),
-                .product(name: "DBClientKit", package: "swift"),
+                .product(name: "OrdalCore", package: "swift"),
+                .product(name: "OrdalKit", package: "swift"),
             ],
-            path: "Sources/DBClientMac"
+            path: "Sources/OrdalMac"
         ),
     ]
 )

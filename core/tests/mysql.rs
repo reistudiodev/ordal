@@ -1,10 +1,10 @@
-//! Needs `DBCLIENT_TEST_MYSQL_URL` (MySQL 8) and/or `DBCLIENT_TEST_MARIADB_URL`
+//! Needs `ORDAL_TEST_MYSQL_URL` (MySQL 8) and/or `ORDAL_TEST_MARIADB_URL`
 //! (MariaDB 10.11); each is skipped when unset.
 
 mod common;
 
 use common::{assert_cancels, exec, fixture, run};
-use dbclient_core::{Value, ValueKind};
+use ordal_core::{Value, ValueKind};
 
 /// 100 000 rows without recursive CTE limits (which differ between engines).
 fn hundred_thousand() -> String {
@@ -50,20 +50,20 @@ async fn suite(engine: &str, expect_name: &str) {
     exec(
         s,
         &format!(
-            "DROP TABLE IF EXISTS dbclient_child, dbclient_parent, dbclient_it, dbclient_flags; \
-             CREATE TABLE dbclient_flags (id INT AUTO_INCREMENT PRIMARY KEY, code VARCHAR(20) UNIQUE NOT NULL, note TEXT); \
-             CREATE TABLE dbclient_it (id INT PRIMARY KEY, name VARCHAR(20) NULL) COLLATE utf8mb4_bin; \
-             INSERT INTO dbclient_it SELECT x, IF(x % 10 = 0, NULL, CONCAT('n', LPAD(x % 37, 2, '0'))) \
+            "DROP TABLE IF EXISTS ordal_child, ordal_parent, ordal_it, ordal_flags; \
+             CREATE TABLE ordal_flags (id INT AUTO_INCREMENT PRIMARY KEY, code VARCHAR(20) UNIQUE NOT NULL, note TEXT); \
+             CREATE TABLE ordal_it (id INT PRIMARY KEY, name VARCHAR(20) NULL) COLLATE utf8mb4_bin; \
+             INSERT INTO ordal_it SELECT x, IF(x % 10 = 0, NULL, CONCAT('n', LPAD(x % 37, 2, '0'))) \
                FROM (SELECT a.n + b.n * 10 + c.n * 100 + 1 AS x FROM {digits} a, {digits} b, {digits} c) t; \
-             CREATE TABLE dbclient_parent (id INT PRIMARY KEY); \
-             CREATE TABLE dbclient_child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES dbclient_parent(id))"
+             CREATE TABLE ordal_parent (id INT PRIMARY KEY); \
+             CREATE TABLE ordal_child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES ordal_parent(id))"
         ),
     )
     .await;
     let db = s.config().database;
-    let path: Vec<String> = vec![db.clone(), "Tables".into(), "dbclient_it".into()];
+    let path: Vec<String> = vec![db.clone(), "Tables".into(), "ordal_it".into()];
     let tables = s.list_children(path[..2].to_vec()).await.unwrap();
-    assert!(tables.iter().any(|n| n.name == "dbclient_it"));
+    assert!(tables.iter().any(|n| n.name == "ordal_it"));
     let cols = s.list_children(path.clone()).await.unwrap();
     // MySQL 8 says `int`, MariaDB keeps the display width: `int(11)`.
     let detail = cols[0].detail.clone().unwrap_or_default();
@@ -71,7 +71,7 @@ async fn suite(engine: &str, expect_name: &str) {
     common::sql_table_suite(s, path, vec![db.clone()]).await;
 
     assert_cancels(s, "SELECT SLEEP(30)").await;
-    exec(s, "DROP TABLE dbclient_child, dbclient_parent, dbclient_it, dbclient_flags").await;
+    exec(s, "DROP TABLE ordal_child, ordal_parent, ordal_it, ordal_flags").await;
 }
 
 #[tokio::test]

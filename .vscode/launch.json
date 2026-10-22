@@ -6,7 +6,7 @@
       "type": "swift",
       "request": "launch",
       "cwd": "${workspaceFolder}/apps/macos",
-      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
+      "program": "${workspaceFolder}/apps/macos/.build/debug/OrdalMac",
       "preLaunchTask": "Build app"
     },
     {
@@ -16,8 +16,8 @@
       "type": "swift",
       "request": "launch",
       "cwd": "${workspaceFolder}/apps/macos",
-      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
-      "env": { "DBCLIENT_HOME": "${workspaceFolder}/.dev/home" },
+      "program": "${workspaceFolder}/apps/macos/.build/debug/OrdalMac",
+      "env": { "ORDAL_HOME": "${workspaceFolder}/.dev/home" },
       "preLaunchTask": "Build app"
     },
     {
@@ -27,10 +27,10 @@
       "type": "swift",
       "request": "launch",
       "cwd": "${workspaceFolder}/apps/macos",
-      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
+      "program": "${workspaceFolder}/apps/macos/.build/debug/OrdalMac",
       "env": {
-        "DBCLIENT_HOME": "${workspaceFolder}/.dev/home",
-        "DBCLIENT_SNAPSHOTS": "${workspaceFolder}/.dev/snapshots"
+        "ORDAL_HOME": "${workspaceFolder}/.dev/home",
+        "ORDAL_SNAPSHOTS": "${workspaceFolder}/.dev/snapshots"
       },
       "preLaunchTask": "Build app"
     },
@@ -39,20 +39,20 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "--lib", "-p", "dbclient-core"],
-        "filter": { "name": "dbclient_core", "kind": "lib" }
+        "args": ["test", "--no-run", "--lib", "-p", "ordal-core"],
+        "filter": { "name": "ordal_core", "kind": "lib" }
       },
       "args": [],
       "cwd": "${workspaceFolder}"
     },
     {
-      // Set DBCLIENT_TEST_<ENGINE>_URL in "env" to run the server suites
+      // Set ORDAL_TEST_<ENGINE>_URL in "env" to run the server suites
       // against your own databases (see README → Testing).
       "name": "Debug Rust integration test (pick one)",
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "-p", "dbclient-core", "--test", "${input:integrationTest}"],
+        "args": ["test", "--no-run", "-p", "ordal-core", "--test", "${input:integrationTest}"],
         "filter": { "name": "${input:integrationTest}", "kind": "test" }
       },
       "args": ["--nocapture"],
@@ -64,7 +64,7 @@
       "type": "swift",
       "request": "launch",
       "cwd": "${workspaceFolder}/apps/linux",
-      "program": "${workspaceFolder}/apps/linux/.build/debug/DBClientLinux",
+      "program": "${workspaceFolder}/apps/linux/.build/debug/OrdalLinux",
       "preLaunchTask": "Build app"
     },
     {
@@ -72,7 +72,7 @@
       "type": "swift",
       "request": "launch",
       "cwd": "${workspaceFolder}/apps/windows",
-      "program": "${workspaceFolder}/apps/windows/.build/debug/DBClientWindows.exe",
+      "program": "${workspaceFolder}/apps/windows/.build/debug/OrdalWindows.exe",
       "preLaunchTask": "Build app"
     }
   ],

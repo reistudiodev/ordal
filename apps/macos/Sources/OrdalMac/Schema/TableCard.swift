@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// The glyphs shared by cards and the legend.
@@ -11,20 +11,37 @@ enum ColumnGlyph {
     static let notNull = "diamond.fill"
 }
 
+/// What a card's menu and hover do, supplied by the diagram.
+struct CardActions {
+    var open: () -> Void
+    var newQuery: () -> Void
+    var toggleFocus: () -> Void
+    var hide: () -> Void
+    var hover: (_ column: String?) -> Void
+}
+
 /// A table card: header with ⋮ menu, then every column with its flags and type.
-struct TableCard: View {
+/// It takes plain values and is `Equatable`, so moving one card while
+/// dragging re-renders only that card. Dragging and clicks are handled by
+/// `DiagramHostingView`; hover and the menu stay here.
+struct TableCard: View, Equatable {
     let table: GraphTable
-    let tab: SchemaTabModel
-    let isForeignKey: (String) -> Bool
-    let open: () -> Void
-    let newQuery: () -> Void
-    @State private var drag: CGSize = .zero
+    let position: DiagramPoint
+    let emphasis: SchemaTabModel.Emphasis
+    let hoveredColumn: String?
+    let foreignKeys: Set<String>
+    let references: [String]
+    let isFocusingThis: Bool
+    let actions: CardActions
+
+    static func == (a: TableCard, b: TableCard) -> Bool {
+        a.table == b.table && a.position == b.position && a.emphasis == b.emphasis
+            && a.hoveredColumn == b.hoveredColumn && a.foreignKeys == b.foreignKeys && a.isFocusingThis == b.isFocusingThis
+    }
 
     var body: some View {
-        let p = tab.positions[table.name] ?? DiagramPoint(x: 0, y: 0)
-        let emphasis = tab.emphasis(ofTable: table.name)
         VStack(alignment: .leading, spacing: 0) {
-            header(selected: emphasis == .highlighted)
+            header
             ForEach(Array(table.columns.enumerated()), id: \.offset) { i, c in
                 row(c, striped: i % 2 == 1)
             }
@@ -40,24 +57,14 @@ struct TableCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
         .opacity(emphasis == .dimmed ? 0.35 : 1)
-        .offset(x: p.x + drag.width, y: p.y + drag.height)
-        .onTapGesture(count: 2, perform: open)
-        .onTapGesture { tab.selected = tab.selected == table.name ? nil : table.name }
-        .gesture(
-            DragGesture(minimumDistance: 3)
-                .onChanged { drag = $0.translation }
-                .onEnded { v in
-                    tab.move(table.name, to: DiagramPoint(x: p.x + v.translation.width, y: p.y + v.translation.height))
-                    drag = .zero
-                }
-        )
+        .offset(x: position.x, y: position.y)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open", open)
+        .accessibilityAction(named: "Open", actions.open)
     }
 
-    private func header(selected: Bool) -> some View {
+    private var header: some View {
         HStack(spacing: Space.s) {
             Image(systemName: "tablecells").foregroundStyle(.secondary)
             Text(table.name).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
@@ -69,38 +76,32 @@ struct TableCard: View {
                     .help("About \(n.formatted()) rows")
             }
             Menu {
-                Button("Open Data", action: open)
-                Button("New Query", action: newQuery)
+                Button("Open Data", action: actions.open)
+                Button("New Query", action: actions.newQuery)
                 Button("Copy Name") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(table.name, forType: .string)
                 }
                 Divider()
-                Button(tab.focusOnly && tab.selected == table.name ? "Show All Tables" : "Show Only Related") {
-                    if tab.focusOnly && tab.selected == table.name {
-                        tab.focusOnly = false
-                    } else {
-                        tab.selected = table.name
-                        tab.focusOnly = true
-                    }
-                }
-                Button("Hide Table") { tab.hide(table.name) }
+                Button(isFocusingThis ? "Show All Tables" : "Show Only Related", action: actions.toggleFocus)
+                Button("Hide Table", action: actions.hide)
             } label: {
-                Image(systemName: "ellipsis").rotationEffect(.degrees(90))
+                Image(systemName: "ellipsis")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .frame(width: 20)
             .accessibilityLabel("Actions for \(table.name)")
         }
         .padding(.horizontal, Space.s + 2)
         .frame(height: SchemaLayout.headerHeight)
-        .background(selected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04))
+        .background(emphasis == .highlighted ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04))
         .overlay(alignment: .bottom) { Divider() }
     }
 
     private func row(_ c: GraphColumn, striped: Bool) -> some View {
-        let hovered = tab.hovered?.table == table.name && tab.hovered?.column == c.name
+        let hovered = hoveredColumn == c.name
         return HStack(spacing: 6) {
             // Key / identity slot.
             Group {
@@ -127,7 +128,7 @@ struct TableCard: View {
             }
             Text(c.name)
                 .font(.caption)
-                .fontWeight(isForeignKey(c.name) ? .semibold : .regular)
+                .fontWeight(foreignKeys.contains(c.name) ? .semibold : .regular)
                 .lineLimit(1)
             Spacer(minLength: Space.hairline)
             Text(c.typeName)
@@ -141,17 +142,16 @@ struct TableCard: View {
         .contentShape(Rectangle())
         .onHover { inside in
             if inside {
-                tab.hovered = (table.name, c.name)
-            } else if tab.hovered?.table == table.name && tab.hovered?.column == c.name {
-                tab.hovered = nil
+                actions.hover(c.name)
+            } else if hovered {
+                actions.hover(nil)
             }
         }
     }
 
     private var accessibilityText: String {
         var text = "\(table.name), \(table.columns.count) columns"
-        let refs = tab.references(of: table.name)
-        if !refs.isEmpty { text += ", references \(refs.joined(separator: ", "))" }
+        if !references.isEmpty { text += ", references \(references.joined(separator: ", "))" }
         return text
     }
 

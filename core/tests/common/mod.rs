@@ -1,6 +1,6 @@
 //! Shared helpers for the integration tests.
 //!
-//! Server engines read their URL from `DBCLIENT_TEST_<ENGINE>_URL` (see
+//! Server engines read their URL from `ORDAL_TEST_<ENGINE>_URL` (see
 //! `docker-compose.test.yml` and `scripts/test-integration.sh`). When it is
 //! unset or the server is unreachable, the test prints a note and passes, so
 //! `cargo test` works on machines without Docker.
@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use dbclient_core::{parse_connection_url, ColumnInfo, ConnectionManager, CoreError, Row, Session};
+use ordal_core::{parse_connection_url, ColumnInfo, ConnectionManager, CoreError, Row, Session};
 
 pub struct Fixture {
     _dir: tempfile::TempDir,
@@ -28,9 +28,9 @@ pub async fn open_url(url: &str) -> Result<Fixture, CoreError> {
     Ok(Fixture { _dir: dir, manager, session })
 }
 
-/// The fixture for `DBCLIENT_TEST_<engine>_URL`, or None (test skipped).
+/// The fixture for `ORDAL_TEST_<engine>_URL`, or None (test skipped).
 pub async fn fixture(engine: &str) -> Option<Fixture> {
-    let var = format!("DBCLIENT_TEST_{engine}_URL");
+    let var = format!("ORDAL_TEST_{engine}_URL");
     let Ok(url) = std::env::var(&var) else {
         eprintln!("skipped: {var} not set (docker not available?)");
         return None;
@@ -93,10 +93,10 @@ pub async fn assert_cancels(session: &Session, sql: &str) {
     session.ping().await.unwrap();
 }
 
-use dbclient_core::{CellEdit, PageCursor, SortSpec, TablePage, Value};
+use ordal_core::{CellEdit, PageCursor, SortSpec, TablePage, Value};
 
 /// Every row, walking pages from the first to the last with keyset cursors.
-pub async fn walk_forward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<dbclient_core::Row> {
+pub async fn walk_forward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<ordal_core::Row> {
     let mut rows = Vec::new();
     let mut page: TablePage = s.fetch_page(path.to_vec(), PageCursor::First, size, sort.clone()).await.unwrap();
     loop {
@@ -115,7 +115,7 @@ pub async fn walk_forward(s: &Session, path: &[String], size: u32, sort: Option<
 }
 
 /// Every row, walking backwards from the last page; returned in table order.
-pub async fn walk_backward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<dbclient_core::Row> {
+pub async fn walk_backward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<ordal_core::Row> {
     let mut pages = Vec::new();
     let mut page = s.fetch_page(path.to_vec(), PageCursor::Last, size, sort.clone()).await.unwrap();
     loop {
@@ -143,10 +143,10 @@ pub fn expected_name(id: i64) -> Option<String> {
 
 /// The paging, sorting and editing contract for a SQL table created with
 /// 1000 rows of `(id int primary key, name varchar(20) null)` using
-/// `expected_name`, plus `dbclient_parent` / `dbclient_child` linked by a
+/// `expected_name`, plus `ordal_parent` / `ordal_child` linked by a
 /// foreign key under `graph_path`.
 pub async fn sql_table_suite(s: &Session, path: Vec<String>, graph_path: Vec<String>) {
-    let ids = |rows: &[dbclient_core::Row]| rows.iter().map(|r| int(&r.cells[0])).collect::<Vec<_>>();
+    let ids = |rows: &[ordal_core::Row]| rows.iter().map(|r| int(&r.cells[0])).collect::<Vec<_>>();
     let all: Vec<i64> = (1..=1000).collect();
 
     let meta = s.table_meta(path.clone()).await.unwrap();
@@ -220,14 +220,14 @@ pub async fn sql_table_suite(s: &Session, path: Vec<String>, graph_path: Vec<Str
 
     // Relations.
     let graph = s.schema_graph(graph_path).await.unwrap();
-    let rel = graph.relations.iter().find(|r| r.from_table.ends_with("dbclient_child")).expect("child → parent relation");
-    assert!(rel.to_table.ends_with("dbclient_parent"));
+    let rel = graph.relations.iter().find(|r| r.from_table.ends_with("ordal_child")).expect("child → parent relation");
+    assert!(rel.to_table.ends_with("ordal_parent"));
     assert_eq!(rel.from_columns, vec!["parent_id".to_string()]);
     assert_eq!(rel.to_columns, vec!["id".to_string()]);
     assert!(!rel.inferred);
 
-    // Column flags on `dbclient_flags (id identity PK, code unique not null, note nullable)`.
-    let flags = graph.tables.iter().find(|t| t.name.ends_with("dbclient_flags")).expect("dbclient_flags in the graph");
+    // Column flags on `ordal_flags (id identity PK, code unique not null, note nullable)`.
+    let flags = graph.tables.iter().find(|t| t.name.ends_with("ordal_flags")).expect("ordal_flags in the graph");
     let col = |n: &str| flags.columns.iter().find(|c| c.name == n).unwrap();
     let (id, code, note) = (col("id"), col("code"), col("note"));
     assert!(id.is_key && id.is_identity && !id.nullable, "{id:?}");

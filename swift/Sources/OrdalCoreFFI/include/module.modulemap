@@ -1,4 +1,4 @@
-module DBClientCoreFFI {
-    header "DBClientCoreFFI.h"
+module OrdalCoreFFI {
+    header "OrdalCoreFFI.h"
     export *
 }

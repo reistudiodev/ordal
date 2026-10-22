@@ -1,4 +1,4 @@
-# DB Client
+# Ordal
 
 A native, cross-platform database client (think DBeaver / Beekeeper Studio).
 
@@ -9,16 +9,16 @@ A native, cross-platform database client (think DBeaver / Beekeeper Studio).
 ```
 .
 ├── Cargo.toml              Rust workspace
-├── core/                   dbclient-core crate (the brain)
+├── core/                   ordal-core crate (the brain)
 │   ├── src/lib.rs          public API exported to Swift
 │   ├── src/drivers/        one module per engine, behind a Cargo feature
 │   ├── tests/              integration tests (SQLite always; others need Docker)
 │   └── uniffi.toml         Swift module names
 ├── uniffi-bindgen/         tiny CLI that generates the Swift bindings
-├── swift/                  Swift package "DBClientCore"
-│   ├── Sources/DBClientCoreFFI/   C header + module map (generated)
-│   ├── Sources/DBClientCore/      Swift API (generated)
-│   ├── Sources/DBClientKit/       shared view models for every platform (hand-written)
+├── swift/                  Swift package "OrdalCore"
+│   ├── Sources/OrdalCoreFFI/   C header + module map (generated)
+│   ├── Sources/OrdalCore/      Swift API (generated)
+│   ├── Sources/OrdalKit/       shared view models for every platform (hand-written)
 │   └── lib/                       Rust static lib goes here (build output)
 ├── apps/
 │   ├── macos/              SwiftUI app
@@ -68,7 +68,7 @@ App Store submission, or if you prefer Xcode's UI for signing.
    (functions, `impl` blocks) or derive `uniffi::Record` / `Enum` / `Object` / `Error`.
 2. Run `scripts/build-core.sh`. The Swift side picks up the new API automatically.
 
-Never edit `swift/Sources/DBClientCore/DBClientCore.swift` or the FFI header by hand: they are regenerated.
+Never edit `swift/Sources/OrdalCore/OrdalCore.swift` or the FFI header by hand: they are regenerated.
 Hand-written Swift helpers go in new files next to them.
 
 ## Testing
@@ -79,15 +79,15 @@ scripts/test-integration.sh        # Postgres 16, MySQL 8, MariaDB 10.11, MongoD
 cd swift && swift test             # bindings + shared view models (after build-core)
 ```
 
-Each server suite reads `DBCLIENT_TEST_<ENGINE>_URL` (`POSTGRES`, `MYSQL`, `MARIADB`, `MONGODB`, `REDIS`),
+Each server suite reads `ORDAL_TEST_<ENGINE>_URL` (`POSTGRES`, `MYSQL`, `MARIADB`, `MONGODB`, `REDIS`),
 so you can also point it at servers you already run. The 1M-row scrolling gate:
 load `scripts/seed-1m.sql`, then `cargo test --release --test postgres -- --ignored`.
 
 ## Development switches (macOS app)
 
-- `DBCLIENT_HOME=/some/dir` keeps connections and history in that directory, with passwords in
+- `ORDAL_HOME=/some/dir` keeps connections and history in that directory, with passwords in
   memory instead of the keychain. Use it to try the app without touching your real settings.
-- `DBCLIENT_SNAPSHOTS=/some/dir` (with `DBCLIENT_HOME`) makes the app drive itself through the main
+- `ORDAL_SNAPSHOTS=/some/dir` (with `ORDAL_HOME`) makes the app drive itself through the main
   screens against the first saved local Postgres connection, write PNGs and a `report.txt` with
   timings (connect, first page, scroll draw times), then quit. It renders offscreen, so sidebar and
   inspector materials appear blank in the images.
@@ -129,4 +129,4 @@ load `scripts/seed-1m.sql`, then `cargo test --release --test postgres -- --igno
 - [ ] Phase 2: read-only workflows polished for MySQL, MongoDB (shell syntax), Redis (typed key viewers), autocomplete
 - [ ] Phase 3: staged edits + review sheet, export/import, SSH tunnels
 - [ ] Phase 4: power tools (explain plans, ER diagram, aggregation builder)
-- [ ] Phase 5: Windows (WinUI) and Linux (GTK) apps on the same core and `DBClientKit`
+- [ ] Phase 5: Windows (WinUI) and Linux (GTK) apps on the same core and `OrdalKit`

@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// A plain-text code editor (NSTextView) with light syntax highlighting.

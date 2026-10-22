@@ -43,9 +43,14 @@ impl ConnectionManager {
     /// Uses the platform's config/data directories and the OS keychain.
     #[uniffi::constructor]
     pub fn new() -> Result<Arc<Self>> {
-        let dirs = directories::ProjectDirs::from("dev", "dbclient", "dbclient")
+        let dirs = directories::ProjectDirs::from("dev", "ordal", "Ordal")
             .ok_or_else(|| CoreError::internal("no home directory"))?;
-        Self::build(dirs.config_dir().to_path_buf(), dirs.data_dir().to_path_buf(), Arc::new(Keychain))
+        let keychain = Keychain::current();
+        // Bring over data saved before the app was renamed (once; best effort).
+        if let Some(old) = crate::migrate::legacy_dirs() {
+            let _ = crate::migrate::migrate(&old, &(dirs.config_dir(), dirs.data_dir()), &Keychain::legacy(), &keychain);
+        }
+        Self::build(dirs.config_dir().to_path_buf(), dirs.data_dir().to_path_buf(), Arc::new(keychain))
     }
 
     /// Keeps everything under `dir`. With `use_keychain` false, passwords are
@@ -54,7 +59,7 @@ impl ConnectionManager {
     pub fn with_directory(dir: String, use_keychain: bool) -> Result<Arc<Self>> {
         let dir = PathBuf::from(dir);
         let secrets: Arc<dyn SecretStore> =
-            if use_keychain { Arc::new(Keychain) } else { Arc::new(MemorySecrets::default()) };
+            if use_keychain { Arc::new(Keychain::current()) } else { Arc::new(MemorySecrets::default()) };
         Self::build(dir.clone(), dir, secrets)
     }
 

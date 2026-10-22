@@ -1,11 +1,11 @@
 ---
-name: "dbclient-add-driver"
-description: "Use when adding or changing a database driver (MySQL, Postgres, MongoDB, Redis, or new) in the dbclient Rust core."
+name: "ordal-add-driver"
+description: "Use when adding or changing a database driver (MySQL, Postgres, MongoDB, Redis, or new) in the ordal Rust core."
 ---
 
-# Adding a database driver to dbclient
+# Adding a database driver to ordal
 
-Layout: Rust core crate `dbclient-core` in `core/` (Cargo workspace), exposed to Swift via UniFFI (proc-macro style). Swift package in `swift/`, apps in `apps/macos`, `apps/windows`, `apps/linux`.
+Layout: Rust core crate `ordal-core` in `core/` (Cargo workspace), exposed to Swift via UniFFI (proc-macro style). Swift package in `swift/`, apps in `apps/macos`, `apps/windows`, `apps/linux`.
 
 ## Steps
 1. Put each driver in its own module: `core/src/drivers/<name>.rs`, behind a Cargo feature named after the database.

@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// Spacing on an 8 pt grid; 4 pt only for fine-tuning inside dense controls.

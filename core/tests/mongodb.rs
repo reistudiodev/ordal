@@ -1,9 +1,9 @@
-//! Needs `DBCLIENT_TEST_MONGODB_URL` (MongoDB 7); skipped otherwise.
+//! Needs `ORDAL_TEST_MONGODB_URL` (MongoDB 7); skipped otherwise.
 
 mod common;
 
 use common::{exec, fixture, run};
-use dbclient_core::{CellEdit, NodeKind, PageCursor, SortSpec, StatementKind, Value};
+use ordal_core::{CellEdit, NodeKind, PageCursor, SortSpec, StatementKind, Value};
 
 #[tokio::test]
 async fn mongodb_suite() {
@@ -11,7 +11,7 @@ async fn mongodb_suite() {
     let s = &f.session;
     assert_eq!(s.server_info().await.unwrap().engine, "MongoDB");
 
-    let _ = run(s, r#"{"drop": "dbclient_it"}"#, 10).await;
+    let _ = run(s, r#"{"drop": "ordal_it"}"#, 10).await;
     for batch in 0..4 {
         let docs: Vec<String> = (0..5000)
             .map(|i| {
@@ -19,29 +19,29 @@ async fn mongodb_suite() {
                 format!(r#"{{"_id": {n}, "name": "n{n}", "even": {}}}"#, n % 2 == 0)
             })
             .collect();
-        exec(s, &format!(r#"{{"insert": "dbclient_it", "documents": [{}]}}"#, docs.join(","))).await;
+        exec(s, &format!(r#"{{"insert": "ordal_it", "documents": [{}]}}"#, docs.join(","))).await;
     }
 
     let (cols, rows, _) =
-        run(s, r#"{"find": "dbclient_it", "filter": {"_id": {"$lt": 3}}, "sort": {"_id": 1}}"#, 100).await.unwrap();
+        run(s, r#"{"find": "ordal_it", "filter": {"_id": {"$lt": 3}}, "sort": {"_id": 1}}"#, 100).await.unwrap();
     assert_eq!(cols[0].name, "document");
     assert_eq!(rows.len(), 3);
-    assert!(matches!(&rows[0].cells[0], Value::Json { v } if v.contains("\"n0\"")));
+    assert!(matches!(&rows[0].cells[0], Value::Json { v } if v.contains("\"n0\"") && v.contains("$numberInt")));
 
-    let (_, rows, largest) = run(s, r#"{"find": "dbclient_it", "filter": {}}"#, 500).await.unwrap();
+    let (_, rows, largest) = run(s, r#"{"find": "ordal_it", "filter": {}}"#, 500).await.unwrap();
     assert_eq!(rows.len(), 20_000);
     assert!(largest <= 500);
 
     let (_, rows, _) =
-        run(s, r#"{"aggregate": "dbclient_it", "pipeline": [{"$group": {"_id": "$even", "n": {"$sum": 1}}}]}"#, 10)
+        run(s, r#"{"aggregate": "ordal_it", "pipeline": [{"$group": {"_id": "$even", "n": {"$sum": 1}}}]}"#, 10)
             .await
             .unwrap();
     assert_eq!(rows.len(), 2);
 
     let db = s.config().database;
     let colls = s.list_children(vec![db.clone()]).await.unwrap();
-    assert!(colls.iter().any(|n| n.name == "dbclient_it" && n.kind == NodeKind::Collection));
-    let path = vec![db.clone(), "dbclient_it".to_string()];
+    assert!(colls.iter().any(|n| n.name == "ordal_it" && n.kind == NodeKind::Collection));
+    let path = vec![db.clone(), "ordal_it".to_string()];
     let idx = s.list_children(path.clone()).await.unwrap();
     assert!(idx.iter().any(|n| n.name == "_id_"));
     // Keyset pages on _id, both directions, cover every document once.
@@ -51,6 +51,9 @@ async fn mongodb_suite() {
     let page = s.fetch_page(path.clone(), PageCursor::First, 5, None).await.unwrap();
     assert_eq!(page.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["_id", "name", "even"]);
     assert_eq!(page.rows[0].cells, vec![Value::Int { v: 0 }, Value::Text { v: "n0".into() }, Value::Bool { v: true }]);
+    // Whole documents come along, in stored field order.
+    assert_eq!(page.documents.len(), 5);
+    assert_eq!(page.documents[0], r#"{"_id":{"$numberInt":"0"},"name":"n0","even":true}"#);
     assert_eq!(s.row_count(path.clone(), true).await.unwrap().count, 20_000);
 
     // Sorted by a field pages with skip.
@@ -90,5 +93,5 @@ async fn mongodb_suite() {
     exec(s, r#"{"drop": "orders"}"#).await;
 
     assert_eq!(s.classify(r#"{"dropDatabase": 1}"#.into()), StatementKind::Destructive);
-    exec(s, r#"{"drop": "dbclient_it"}"#).await;
+    exec(s, r#"{"drop": "ordal_it"}"#).await;
 }

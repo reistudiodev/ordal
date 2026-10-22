@@ -1,9 +1,9 @@
-//! Needs `DBCLIENT_TEST_POSTGRES_URL` (Postgres 16 in Docker); skipped otherwise.
+//! Needs `ORDAL_TEST_POSTGRES_URL` (Postgres 16 in Docker); skipped otherwise.
 
 mod common;
 
 use common::{assert_cancels, exec, fixture, run};
-use dbclient_core::{CoreError, NodeKind, PageCursor, SortSpec, Value};
+use ordal_core::{CoreError, NodeKind, PageCursor, SortSpec, Value};
 
 #[tokio::test]
 async fn postgres_suite() {
@@ -50,28 +50,28 @@ async fn postgres_suite() {
     // Browse.
     exec(
         s,
-        "DROP TABLE IF EXISTS public.dbclient_child, public.dbclient_parent, public.dbclient_it, public.dbclient_flags; \
-         CREATE TABLE public.dbclient_flags (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, code text UNIQUE NOT NULL, note text); \
-         CREATE TABLE public.dbclient_it (id int PRIMARY KEY, name varchar(20)); \
-         INSERT INTO public.dbclient_it SELECT g, CASE WHEN g % 10 = 0 THEN NULL ELSE 'n' || lpad((g % 37)::text, 2, '0') END \
+        "DROP TABLE IF EXISTS public.ordal_child, public.ordal_parent, public.ordal_it, public.ordal_flags; \
+         CREATE TABLE public.ordal_flags (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, code text UNIQUE NOT NULL, note text); \
+         CREATE TABLE public.ordal_it (id int PRIMARY KEY, name varchar(20)); \
+         INSERT INTO public.ordal_it SELECT g, CASE WHEN g % 10 = 0 THEN NULL ELSE 'n' || lpad((g % 37)::text, 2, '0') END \
            FROM generate_series(1, 1000) g; \
-         CREATE TABLE public.dbclient_parent (id int PRIMARY KEY); \
-         CREATE TABLE public.dbclient_child (id int PRIMARY KEY, parent_id int REFERENCES public.dbclient_parent(id))",
+         CREATE TABLE public.ordal_parent (id int PRIMARY KEY); \
+         CREATE TABLE public.ordal_child (id int PRIMARY KEY, parent_id int REFERENCES public.ordal_parent(id))",
     )
     .await;
     let db = s.config().database;
     let schemas = s.list_children(vec![db.clone()]).await.unwrap();
     assert!(schemas.iter().any(|n| n.name == "public" && n.kind == NodeKind::Schema));
-    let path: Vec<String> = vec![db.clone(), "public".into(), "Tables".into(), "dbclient_it".into()];
+    let path: Vec<String> = vec![db.clone(), "public".into(), "Tables".into(), "ordal_it".into()];
     let cols = s.list_children(path.clone()).await.unwrap();
     assert_eq!(cols[0].detail.as_deref(), Some("integer · PK"));
     common::sql_table_suite(s, path, vec![db.clone(), "public".into()]).await;
 
     // A table without a primary key still pages by ctid, but can't be edited.
-    exec(s, "DROP TABLE IF EXISTS public.dbclient_loose; CREATE TABLE public.dbclient_loose AS SELECT g AS v FROM generate_series(1, 250) g").await;
-    let loose: Vec<String> = vec![db.clone(), "public".into(), "Tables".into(), "dbclient_loose".into()];
+    exec(s, "DROP TABLE IF EXISTS public.ordal_loose; CREATE TABLE public.ordal_loose AS SELECT g AS v FROM generate_series(1, 250) g").await;
+    let loose: Vec<String> = vec![db.clone(), "public".into(), "Tables".into(), "ordal_loose".into()];
     let meta = s.table_meta(loose.clone()).await.unwrap();
-    assert_eq!(meta.paging, dbclient_core::PagingMode::Keyset);
+    assert_eq!(meta.paging, ordal_core::PagingMode::Keyset);
     assert!(!meta.editable);
     assert_eq!(common::walk_forward(s, &loose, 100, None).await.len(), 250);
     assert_eq!(common::walk_backward(s, &loose, 100, None).await.len(), 250);
@@ -88,7 +88,7 @@ async fn postgres_suite() {
 
     // Cancel (server-side via pg_cancel_backend).
     assert_cancels(s, "SELECT pg_sleep(30)").await;
-    exec(s, "DROP TABLE public.dbclient_child, public.dbclient_parent, public.dbclient_it, public.dbclient_loose, public.dbclient_flags").await;
+    exec(s, "DROP TABLE public.ordal_child, public.ordal_parent, public.ordal_it, public.ordal_loose, public.ordal_flags").await;
 }
 
 /// Phase 1 gate: random access into a 1M-row table stays fast enough to

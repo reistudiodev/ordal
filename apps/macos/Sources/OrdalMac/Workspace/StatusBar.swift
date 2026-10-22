@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// A dot for the connection state; its menu reconnects or disconnects.

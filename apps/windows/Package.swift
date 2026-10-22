@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "DBClientWindows",
+    name: "OrdalWindows",
     dependencies: [
         .package(path: "../../swift"),
     ],
     targets: [
         .executableTarget(
-            name: "DBClientWindows",
-            dependencies: [.product(name: "DBClientCore", package: "swift")],
-            path: "Sources/DBClientWindows"
+            name: "OrdalWindows",
+            dependencies: [.product(name: "OrdalCore", package: "swift")],
+            path: "Sources/OrdalWindows"
         ),
     ]
 )

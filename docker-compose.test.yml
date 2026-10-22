@@ -5,7 +5,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_PASSWORD: dbclient
+      POSTGRES_PASSWORD: ordal
     ports: ["55432:5432"]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
@@ -14,18 +14,18 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: dbclient
-      MYSQL_DATABASE: dbclient
+      MYSQL_ROOT_PASSWORD: ordal
+      MYSQL_DATABASE: ordal
     ports: ["53306:3306"]
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pdbclient"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pordal"]
       interval: 2s
       retries: 60
   mariadb:
     image: mariadb:10.11
     environment:
-      MARIADB_ROOT_PASSWORD: dbclient
-      MARIADB_DATABASE: dbclient
+      MARIADB_ROOT_PASSWORD: ordal
+      MARIADB_DATABASE: ordal
     ports: ["53307:3306"]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]

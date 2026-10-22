@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// The whole diagram in miniature with the visible area outlined; click or

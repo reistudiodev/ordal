@@ -4,7 +4,7 @@
 mod common;
 
 use common::{assert_cancels, exec, open_url, run};
-use dbclient_core::{parse_connection_url, CoreError, NodeKind, StatementKind, Value};
+use ordal_core::{parse_connection_url, CoreError, NodeKind, StatementKind, Value};
 
 async fn fixture() -> (tempfile::TempDir, common::Fixture) {
     let dir = tempfile::tempdir().unwrap();
@@ -94,15 +94,15 @@ async fn table_paging_sorting_editing_and_relations() {
     let (_d, f) = fixture().await;
     exec(
         &f.session,
-        "CREATE TABLE dbclient_it (id INTEGER PRIMARY KEY, name VARCHAR(20)); \
+        "CREATE TABLE ordal_it (id INTEGER PRIMARY KEY, name VARCHAR(20)); \
          WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1000) \
-         INSERT INTO dbclient_it SELECT x, CASE WHEN x % 10 = 0 THEN NULL ELSE 'n' || substr('0' || (x % 37), -2) END FROM c; \
-         CREATE TABLE dbclient_parent (id INTEGER PRIMARY KEY); \
-         CREATE TABLE dbclient_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES dbclient_parent); \
-         CREATE TABLE dbclient_flags (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, note TEXT);",
+         INSERT INTO ordal_it SELECT x, CASE WHEN x % 10 = 0 THEN NULL ELSE 'n' || substr('0' || (x % 37), -2) END FROM c; \
+         CREATE TABLE ordal_parent (id INTEGER PRIMARY KEY); \
+         CREATE TABLE ordal_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES ordal_parent); \
+         CREATE TABLE ordal_flags (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, note TEXT);",
     )
     .await;
-    let path: Vec<String> = ["main", "Tables", "dbclient_it"].map(String::from).into();
+    let path: Vec<String> = ["main", "Tables", "ordal_it"].map(String::from).into();
     common::sql_table_suite(&f.session, path, vec!["main".into()]).await;
 }
 
@@ -115,10 +115,10 @@ async fn keyless_tables_page_and_edit_by_rowid() {
     assert_eq!(meta.key_columns, vec!["rowid".to_string()]);
     let rows = common::walk_forward(&f.session, &path, 2, None).await;
     assert_eq!(rows.len(), 3);
-    let page = f.session.fetch_page(path.clone(), dbclient_core::PageCursor::First, 10, None).await.unwrap();
-    let edit = dbclient_core::CellEdit { key: page.row_keys[1].clone(), column: "v".into(), value: Value::Text { v: "B".into() } };
+    let page = f.session.fetch_page(path.clone(), ordal_core::PageCursor::First, 10, None).await.unwrap();
+    let edit = ordal_core::CellEdit { key: page.row_keys[1].clone(), column: "v".into(), value: Value::Text { v: "B".into() } };
     f.session.apply_edits(path.clone(), vec![edit]).await.unwrap();
-    let page = f.session.fetch_page(path, dbclient_core::PageCursor::First, 10, None).await.unwrap();
+    let page = f.session.fetch_page(path, ordal_core::PageCursor::First, 10, None).await.unwrap();
     assert_eq!(page.rows[1].cells[0], Value::Text { v: "B".into() });
 }
 
@@ -127,9 +127,9 @@ async fn views_page_by_offset_and_are_read_only() {
     let (_d, f) = fixture().await;
     let path: Vec<String> = ["main", "Views", "v"].map(String::from).into();
     let meta = f.session.table_meta(path.clone()).await.unwrap();
-    assert_eq!(meta.paging, dbclient_core::PagingMode::Offset);
+    assert_eq!(meta.paging, ordal_core::PagingMode::Offset);
     assert!(!meta.editable);
-    let page = f.session.fetch_page(path.clone(), dbclient_core::PageCursor::First, 10, None).await.unwrap();
+    let page = f.session.fetch_page(path.clone(), ordal_core::PageCursor::First, 10, None).await.unwrap();
     assert_eq!(page.rows.len(), 2);
     assert!(page.first_key.is_none());
 }
@@ -163,7 +163,7 @@ async fn read_only_connections_refuse_writes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ro.db");
     std::fs::File::create(&path).unwrap();
-    let manager = dbclient_core::ConnectionManager::with_directory(dir.path().to_string_lossy().into(), false).unwrap();
+    let manager = ordal_core::ConnectionManager::with_directory(dir.path().to_string_lossy().into(), false).unwrap();
     let mut config = parse_connection_url(format!("sqlite://{}", path.display())).unwrap().config;
     config.read_only = true;
     let saved = manager.save(config, None).unwrap();

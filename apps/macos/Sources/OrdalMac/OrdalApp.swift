@@ -1,12 +1,12 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import OSLog
 import SwiftUI
 
 /// Startup is measured from `init` to the first frame (target: under 1 s).
 enum Startup {
-    static let signposter = OSSignposter(subsystem: "dev.dbclient.mac", category: "startup")
-    static let log = Logger(subsystem: "dev.dbclient.mac", category: "startup")
+    static let signposter = OSSignposter(subsystem: "dev.ordal.mac", category: "startup")
+    static let log = Logger(subsystem: "dev.ordal.mac", category: "startup")
     static let began = Date()
     static var state: OSSignpostIntervalState?
 
@@ -19,7 +19,7 @@ enum Startup {
 }
 
 @main
-struct DBClientMacApp: App {
+struct OrdalApp: App {
     @State private var app = AppState()
 
     init() {
@@ -28,11 +28,12 @@ struct DBClientMacApp: App {
         // this is a regular app that gets a Dock icon and a focused window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        LegacyDefaults.migrateOnce()
         NSApplication.shared.appearance = AppTheme.current.nsAppearance
     }
 
     var body: some Scene {
-        WindowGroup("DB Client") {
+        WindowGroup("Ordal") {
             RootView()
                 .environment(app)
         }

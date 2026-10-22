@@ -1,9 +1,9 @@
 import Foundation
 import XCTest
-@testable import DBClientKit
+@testable import OrdalKit
 
 @MainActor
-final class DBClientKitTests: XCTestCase {
+final class OrdalKitTests: XCTestCase {
     private var dir: URL!
 
     override func setUp() async throws {
@@ -422,8 +422,57 @@ final class DBClientKitTests: XCTestCase {
         XCTAssertEqual(Set(lanes).count, lanes.count, "parallel edges get their own lanes")
     }
 
+    func testDiagramHitTestAndLiveMove() async throws {
+        let (_, ws) = try await openWorkspace()
+        let graph = SchemaGraph(
+            tables: [table("parent", ["id"]), table("child", ["id", "parent_id"])],
+            relations: [rel("child", ["parent_id"], "parent", ["id"])]
+        )
+        let defaults = UserDefaults(suiteName: "ordal.tests.\(UUID().uuidString)")!
+        let tab = SchemaTabModel(path: ["db"], session: ws.session, graph: graph, defaults: defaults)
+        let p = try XCTUnwrap(tab.positions["child"])
+        XCTAssertEqual(tab.table(at: DiagramPoint(x: p.x + 10, y: p.y + 10)), "child")
+        XCTAssertNil(tab.table(at: DiagramPoint(x: 1, y: 1)), "empty canvas")
+
+        // A live drag step moves the card and its edge, without saving.
+        let before = tab.edges[0]
+        tab.move("child", to: DiagramPoint(x: p.x + 300, y: p.y + 120), persist: false)
+        let after = tab.edges[0]
+        XCTAssertNotEqual(before.points, after.points)
+        let child = graph.tables.first { $0.name == "child" }!
+        XCTAssertEqual(after.points.first?.y, SchemaLayout.rowY(child, column: "parent_id", top: p.y + 120))
+        let id = ws.session.config().id
+        XCTAssertTrue(DiagramLayoutStore.load(connection: id, path: ["db"], defaults: defaults).isEmpty)
+        tab.move("child", to: DiagramPoint(x: p.x + 300, y: p.y + 120), persist: true)
+        XCTAssertEqual(DiagramLayoutStore.load(connection: id, path: ["db"], defaults: defaults)["child"],
+                       DiagramPoint(x: p.x + 300, y: p.y + 120))
+    }
+
+    func testDocumentParsingKeepsOrderAndTypes() throws {
+        let json = #"{"_id":{"$oid":"65f000000000000000000001"},"zeta":1,"alpha":"x\n\u00e9\ud83d\ude00","when":{"$date":"2026-01-02T03:04:05Z"},"price":{"$numberDecimal":"9.99"},"big":{"$numberLong":"9007199254740993"},"tags":["a",true,null],"nested":{"b":2.5,"a":[]}}"#
+        let doc = try XCTUnwrap(DocValue.parse(json))
+        guard case .object(let fields) = doc else { return XCTFail("not an object") }
+        XCTAssertEqual(fields.map(\.key), ["_id", "zeta", "alpha", "when", "price", "big", "tags", "nested"], "stored order")
+        XCTAssertEqual(fields[0].value, .objectId("65f000000000000000000001"))
+        XCTAssertEqual(fields[2].value, .string("x\né😀"))
+        XCTAssertEqual(fields[3].value, .date("2026-01-02T03:04:05Z"))
+        XCTAssertEqual(fields[4].value, .decimal("9.99"))
+        XCTAssertEqual(fields[5].value, .long("9007199254740993"), "big integers keep every digit")
+        XCTAssertEqual(fields[6].value.preview, "Array (3)")
+        XCTAssertEqual(fields[7].value.typeName, "Object")
+        XCTAssertTrue(doc.prettyText().contains("\"_id\": ObjectId('65f000000000000000000001')"))
+        XCTAssertTrue(doc.prettyText().contains("\"price\": NumberDecimal('9.99')"))
+        XCTAssertNil(DocValue.parse("{\"a\": }"))
+        // Canonical form keeps exact BSON number types.
+        let canonical = try XCTUnwrap(DocValue.parse(#"{"i":{"$numberInt":"34"},"d":{"$numberDouble":"-6.2"},"l":{"$numberLong":"5"}}"#))
+        guard case .object(let typed) = canonical else { return XCTFail() }
+        XCTAssertEqual(typed.map(\.value.typeName), ["Int32", "Double", "Int64"])
+        XCTAssertEqual(DocValue.number("9007199254740993").typeName, "Int64", "relaxed big integers are not Int32")
+        XCTAssertEqual(DocValue.parse(#"{"d":{"$date":{"$numberLong":"0"}}}"#), .object([.init(key: "d", value: .date("1970-01-01T00:00:00.000Z"))]))
+    }
+
     func testDiagramPositionsPersist() {
-        let defaults = UserDefaults(suiteName: "dbclient.tests.\(UUID().uuidString)")!
+        let defaults = UserDefaults(suiteName: "ordal.tests.\(UUID().uuidString)")!
         DiagramLayoutStore.save(["t": DiagramPoint(x: 10, y: 20)], connection: "c1", path: ["db", "public"], defaults: defaults)
         XCTAssertEqual(DiagramLayoutStore.load(connection: "c1", path: ["db", "public"], defaults: defaults)["t"], DiagramPoint(x: 10, y: 20))
         XCTAssertTrue(DiagramLayoutStore.load(connection: "c2", path: ["db", "public"], defaults: defaults).isEmpty)

@@ -1,10 +1,10 @@
-//! Needs `DBCLIENT_TEST_REDIS_URL` (Redis 7); skipped otherwise.
+//! Needs `ORDAL_TEST_REDIS_URL` (Redis 7); skipped otherwise.
 //! Uses whatever db index the URL names; point it at a scratch db (e.g. `/15`).
 
 mod common;
 
 use common::{assert_cancels, exec, fixture, run};
-use dbclient_core::{NodeKind, Value};
+use ordal_core::{NodeKind, Value};
 
 #[tokio::test]
 async fn redis_suite() {
@@ -42,6 +42,6 @@ async fn redis_suite() {
     assert!(info.ttl_ms.is_some_and(|t| t > 0));
 
     // BLPOP blocks server-side; cancel must free it and leave the session usable.
-    assert_cancels(s, "BLPOP dbclient:nothing 30").await;
+    assert_cancels(s, "BLPOP ordal:nothing 30").await;
     exec(s, "FLUSHDB").await;
 }

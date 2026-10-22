@@ -1,9 +1,9 @@
 ---
-name: "dbclient-ui-rules"
-description: "Use when designing or building any UI screen for the dbclient database app on macOS, Windows or Linux."
+name: "ordal-ui-rules"
+description: "Use when designing or building any UI screen for the ordal database app on macOS, Windows or Linux."
 ---
 
-# dbclient UI/UX rules
+# ordal UI/UX rules
 
 Goal: DBeaver-level power with a fresh, calm, modern UI that feels native on each OS.
 

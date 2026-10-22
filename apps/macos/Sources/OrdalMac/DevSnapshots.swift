@@ -1,16 +1,16 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
-/// Development aid: with `DBCLIENT_SNAPSHOTS=/some/dir` (and usually
-/// `DBCLIENT_HOME`), the app drives itself through the main screens against
+/// Development aid: with `ORDAL_SNAPSHOTS=/some/dir` (and usually
+/// `ORDAL_HOME`), the app drives itself through the main screens against
 /// the first saved Postgres connection, writes PNGs of each, measures grid
 /// scrolling, and quits. It renders its own windows, so it needs no screen
 /// recording permission. Never active in normal use.
 @MainActor
 enum DevSnapshots {
     static var outputDir: URL? {
-        ProcessInfo.processInfo.environment["DBCLIENT_SNAPSHOTS"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        ProcessInfo.processInfo.environment["ORDAL_SNAPSHOTS"].map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
     static func run(app: AppState) async {
@@ -45,6 +45,10 @@ enum DevSnapshots {
             captureSheet("connect-mongo-\(topology == .srv ? "srv" : "replicaset")", in: dir)
             app.form = nil
             await settle(0.3)
+        }
+
+        if let mongo = app.connections.first(where: { $0.kind == .mongoDb }) {
+            await mongoFlow(app: app, config: mongo, dir: dir, note: note)
         }
 
         guard let pg = app.connections.first(where: { $0.kind == .postgres && $0.environment == .local }) else {
@@ -130,6 +134,20 @@ enum DevSnapshots {
             note("relations: \(schema.graph?.tables.count ?? 0) tables, \(schema.graph?.relations.count ?? 0) relations \(schema.error ?? "")")
             await settle(1.0)
             capture("relations", in: dir)
+            if let root = mainWindow?.contentView, let scroll = findScroll(root) {
+                for zoom in [0.62, 1.5] {
+                    await checkDrag(schema, scroll: scroll, zoom: zoom, note: note)
+                }
+                await checkPan(schema, scroll: scroll, note: note)
+                scroll.magnification = 0.3
+                await settle(0.8)
+                capture("relations-zoomed-out", in: dir)
+                if let doc = scroll.documentView, let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                    doc.cacheDisplay(in: doc.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("relations-after-drag.png"))
+                }
+                note("zoomed out to 30%: document \(Int(scroll.documentView!.frame.width))x\(Int(scroll.documentView!.frame.height)), viewport \(Int(scroll.contentView.bounds.width))x\(Int(scroll.contentView.bounds.height)) canvas units")
+            }
             NSApp.appearance = NSAppearance(named: .darkAqua)
             await settle()
             capture("relations-dark", in: dir)
@@ -251,6 +269,141 @@ enum DevSnapshots {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.visibleRect) else { return }
         view.cacheDisplay(in: view.visibleRect, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+    }
+
+    /// Drags a card with real mouse events and checks it stayed under the cursor.
+    private static func checkDrag(_ tab: SchemaTabModel, scroll: NSScrollView, zoom: Double, note: (String) -> Void) async {
+        guard let doc = scroll.documentView, let window = doc.window,
+              let name = tab.visibleTables.first(where: { !tab.references(of: $0.name).isEmpty })?.name,
+              let start = tab.positions[name] else { return note("drag check: no card") }
+        scroll.magnification = zoom
+        let grab = CGPoint(x: start.x + 40, y: start.y + 15)
+        scroll.contentView.scroll(to: CGPoint(x: max(0, grab.x - 100), y: max(0, grab.y - 100)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await settle(0.5)
+        let from = doc.convert(grab, to: nil)
+        func event(_ type: NSEvent.EventType, _ p: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        doc.mouseDown(with: event(.leftMouseDown, from))
+        var times: [Double] = []
+        // 200 pt right and 100 pt down on screen (window y points up).
+        for i in 1...20 {
+            let p = CGPoint(x: from.x + 10 * Double(i), y: from.y - 5 * Double(i))
+            let t = CACurrentMediaTime()
+            doc.mouseDragged(with: event(.leftMouseDragged, p))
+            doc.displayIfNeeded()
+            times.append((CACurrentMediaTime() - t) * 1000)
+        }
+        doc.mouseUp(with: event(.leftMouseUp, CGPoint(x: from.x + 200, y: from.y - 100)))
+        await settle(0.3)
+        let end = tab.positions[name]!
+        let (dx, dy) = (end.x - start.x, end.y - start.y)
+        let expected = (200 / scroll.magnification, 100 / scroll.magnification)
+        let onCursor = abs(dx - expected.0) < 1.5 && abs(dy - expected.1) < 1.5
+        // Every connector touching the card must end on its new edge.
+        let table = tab.graph!.tables.first { $0.name == name }!
+        let attached = tab.edges.filter { $0.fromTable == name || $0.toTable == name }.allSatisfy { e in
+            let p = e.fromTable == name ? e.points.first! : e.points.last!
+            let column = e.fromTable == name ? e.fromColumn : e.toColumn
+            let onSide = abs(p.x - end.x) < 0.5 || abs(p.x - (end.x + SchemaLayout.cardWidth)) < 0.5
+            return onSide && abs(p.y - SchemaLayout.rowY(table, column: column, top: end.y)) < 0.5
+        }
+        let sorted = times.sorted()
+        note(String(format: "drag %@ at %.0f%%: moved %.1f,%.1f (expected %.1f,%.1f) %@; edges attached: %@; step p50 %.1f ms, max %.1f ms",
+                    name, zoom * 100, dx, dy, expected.0, expected.1, onCursor ? "OK" : "WRONG", attached ? "yes" : "NO",
+                    sorted[sorted.count / 2], sorted.last!))
+    }
+
+    /// Drags empty canvas and checks the view panned by the same distance.
+    private static func checkPan(_ tab: SchemaTabModel, scroll: NSScrollView, note: (String) -> Void) async {
+        guard let doc = scroll.documentView, let window = doc.window else { return }
+        scroll.magnification = 0.8
+        scroll.contentView.scroll(to: CGPoint(x: 200, y: 100))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await settle(0.4)
+        let visible = scroll.documentVisibleRect
+        var empty: CGPoint?
+        search: for x in stride(from: visible.minX + 20, to: visible.maxX - 20, by: 30) {
+            for y in stride(from: visible.minY + 20, to: visible.maxY - 20, by: 30) where tab.table(at: DiagramPoint(x: x, y: y)) == nil {
+                empty = CGPoint(x: x, y: y)
+                break search
+            }
+        }
+        guard let empty else { return note("pan check: no empty spot") }
+        let before = scroll.contentView.bounds.origin
+        let from = doc.convert(empty, to: nil)
+        func event(_ type: NSEvent.EventType, _ p: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        doc.mouseDown(with: event(.leftMouseDown, from))
+        doc.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: from.x - 80, y: from.y + 40)))
+        doc.mouseUp(with: event(.leftMouseUp, CGPoint(x: from.x - 80, y: from.y + 40)))
+        let after = scroll.contentView.bounds.origin
+        note(String(format: "pan at 80%%: view moved %.1f,%.1f (expected %.1f,%.1f)", after.x - before.x, after.y - before.y, 80 / 0.8, 40 / 0.8))
+    }
+
+    /// MongoDB: document cards, JSON and table views, a staged edit, a find.
+    private static func mongoFlow(app: AppState, config: ConnectionConfig, dir: URL, note: (String) -> Void) async {
+        await app.connect(config.id)
+        guard let ws = app.activeWorkspace else { return note("mongo connect failed: \(app.connectError ?? "?")") }
+        let seed = ws.newQueryTab(text: #"""
+            {"insert": "customers", "documents": [
+              {"_id": {"$oid": "65f000000000000000000001"}, "name": "Ann Lee", "email": "ann@example.com", "age": 34, "vip": true,
+               "joined": {"$date": "2025-03-01T09:30:00Z"}, "balance": {"$numberDecimal": "1520.75"}, "visits": {"$numberLong": "9007199254740993"},
+               "address": {"city": "Jakarta", "zip": "10110", "geo": {"lat": -6.2, "lng": 106.8}}, "tags": ["early", "mobile"], "notes": null},
+              {"_id": {"$oid": "65f000000000000000000002"}, "name": "Budi", "email": "budi@example.com", "age": 41, "vip": false,
+               "joined": {"$date": "2024-11-12T15:00:00Z"}, "address": {"city": "Bandung"}, "tags": [], "orders": [{"sku": "A-1", "qty": 2}, {"sku": "B-7", "qty": 1}]}
+            ]}
+            """#)
+        await seed.run()
+        note("mongo seed: \(seed.status)")
+        await ws.browser.loadRoots()
+        if let db = ws.browser.node(at: [config.database]) { await ws.browser.expand(db) }
+        guard let coll = ws.browser.node(at: [config.database, "customers"]) else { return note("mongo: customers not found") }
+        ws.openTable(coll)
+        while ws.activeTable?.pager.page == nil { await settle(0.05) }
+        guard let tab = ws.activeTable else { return }
+        note("mongo page: \(tab.pager.rowCount) docs, documents carried: \(tab.pager.hasDocuments)")
+        for mode in DocumentViewMode.allCases {
+            UserDefaults.standard.set(mode.rawValue, forKey: "mongoResultView")
+            await settle(0.6)
+            capture("mongo-collection-\(mode.rawValue.lowercased())", in: dir)
+            if let root = mainWindow?.contentView, let scroll = findDocScroll(root), let doc = scroll.documentView,
+               let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                doc.cacheDisplay(in: doc.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mongo-cards-\(mode.rawValue.lowercased()).png"))
+            }
+        }
+        UserDefaults.standard.set(DocumentViewMode.documents.rawValue, forKey: "mongoResultView")
+        if let col = tab.pager.columnIndex(of: "age") {
+            tab.pager.stage(row: 0, column: col, value: .int(v: 35))
+            await settle(0.6)
+            if let root = mainWindow?.contentView, let scroll = findDocScroll(root), let doc = scroll.documentView,
+               let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                doc.cacheDisplay(in: doc.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mongo-cards-staged.png"))
+            }
+            tab.pager.discardEdits()
+        }
+        let find = ws.newQueryTab(text: #"{"find": "customers", "filter": {"age": {"$gt": 30}}, "sort": {"age": -1}}"#)
+        await find.run()
+        await settle(0.6)
+        note("mongo find: \(find.pager?.rowCount ?? 0) docs, document view: \(find.pager?.hasDocuments ?? false)")
+        capture("mongo-find", in: dir)
+        _ = ws.newQueryTab(text: #"{"drop": "customers"}"#)
+        await ws.activeQuery?.run()
+        await app.disconnect(ws.id)
+    }
+
+    /// The document list's scroll view (not the grid's, not the diagram's).
+    private static func findDocScroll(_ view: NSView) -> NSScrollView? {
+        if let s = view as? NSScrollView, !s.allowsMagnification, !(s.documentView is NSTableView), !(s.documentView is NSTextView),
+           s.documentView?.frame.height ?? 0 > 200 { return s }
+        for sub in view.subviews { if let s = findDocScroll(sub) { return s } }
+        return nil
     }
 
     private static func findScroll(_ view: NSView) -> NSScrollView? {

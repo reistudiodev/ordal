@@ -10,7 +10,7 @@ use crate::error::{CoreError, Result};
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
-        .thread_name("dbclient-core")
+        .thread_name("ordal-core")
         .enable_all()
         .build()
         .expect("failed to start the Tokio runtime")

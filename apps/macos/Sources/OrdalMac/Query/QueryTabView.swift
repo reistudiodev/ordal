@@ -1,4 +1,4 @@
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// Editor on top, results below, history in a drawer.
@@ -90,6 +90,7 @@ private struct PendingItem: Identifiable {
 private struct ResultsPane: View {
     let tab: QueryTabModel
     let workspace: WorkspaceModel
+    @AppStorage("mongoResultView") private var docMode: DocumentViewMode = .documents
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,6 +133,30 @@ private struct ResultsPane: View {
                     )
                 } else if pager.columns.isEmpty {
                     ProgressView("Running…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if workspace.config.kind == .mongoDb, pager.hasDocuments {
+                    HStack {
+                        DocumentModePicker(mode: $docMode)
+                        Spacer()
+                        Text("\(pager.rowCount.formatted()) \(pager.rowCount == 1 ? "document" : "documents")\(pager.isDone ? "" : "…")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .controlSize(.small)
+                    .padding(.horizontal, Space.s)
+                    .padding(.vertical, Space.hairline)
+                    if docMode == .table {
+                        ResultGridView(
+                            source: pager, version: version,
+                            onSelectCell: { row, col in
+                                if let r = pager.row(at: row) {
+                                    workspace.inspected = .init(column: pager.columns[col], value: r.cells[col], row: row, columnIndex: col)
+                                }
+                            },
+                            onSortColumn: nil
+                        )
+                    } else {
+                        DocumentList(count: pager.rowCount, mode: docMode, document: pager.document(at:), version: version)
+                    }
                 } else {
                     ResultGridView(
                         source: pager, version: version,

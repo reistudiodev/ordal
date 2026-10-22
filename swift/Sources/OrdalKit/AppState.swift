@@ -24,11 +24,11 @@ public final class AppState {
     }
 
     /// Uses the platform's standard directories and keychain. For development,
-    /// `DBCLIENT_HOME=/some/dir` keeps everything in that directory instead,
+    /// `ORDAL_HOME=/some/dir` keeps everything in that directory instead,
     /// with passwords held in memory only.
     public init() {
         do {
-            if let home = ProcessInfo.processInfo.environment["DBCLIENT_HOME"], !home.isEmpty {
+            if let home = ProcessInfo.processInfo.environment["ORDAL_HOME"], !home.isEmpty {
                 manager = try ConnectionManager.withDirectory(dir: home, useKeychain: false)
             } else {
                 manager = try ConnectionManager()

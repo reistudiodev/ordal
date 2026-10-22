@@ -29,10 +29,10 @@ COMPOSE+=(-f docker-compose.test.yml)
 "${COMPOSE[@]}" up -d --wait
 [ "$KEEP" = 1 ] || trap '"${COMPOSE[@]}" down -v' EXIT
 
-export DBCLIENT_TEST_POSTGRES_URL=postgres://postgres:dbclient@127.0.0.1:55432/postgres
-export DBCLIENT_TEST_MYSQL_URL=mysql://root:dbclient@127.0.0.1:53306/dbclient
-export DBCLIENT_TEST_MARIADB_URL=mariadb://root:dbclient@127.0.0.1:53307/dbclient
-export DBCLIENT_TEST_MONGODB_URL=mongodb://127.0.0.1:57017/dbclient
-export DBCLIENT_TEST_REDIS_URL=redis://127.0.0.1:56379/15
+export ORDAL_TEST_POSTGRES_URL=postgres://postgres:ordal@127.0.0.1:55432/postgres
+export ORDAL_TEST_MYSQL_URL=mysql://root:ordal@127.0.0.1:53306/ordal
+export ORDAL_TEST_MARIADB_URL=mariadb://root:ordal@127.0.0.1:53307/ordal
+export ORDAL_TEST_MONGODB_URL=mongodb://127.0.0.1:57017/ordal
+export ORDAL_TEST_REDIS_URL=redis://127.0.0.1:56379/15
 
-cargo test -p dbclient-core
+cargo test -p ordal-core

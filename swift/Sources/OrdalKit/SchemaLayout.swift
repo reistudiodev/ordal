@@ -143,7 +143,7 @@ public enum SchemaLayout {
     // MARK: Routing
 
     /// One drawn connector: from a referencing column to a referenced column.
-    public struct Edge: Identifiable, Equatable {
+    public struct Edge: Identifiable, Equatable, Sendable {
         public let id: String
         public let relation: String
         public let fromTable: String
@@ -223,7 +223,7 @@ public enum SchemaLayout {
 /// Dragged card positions, remembered per connection and schema.
 public enum DiagramLayoutStore {
     static func key(connection: String, path: [String]) -> String {
-        "dbclient.diagram.\(connection).\(path.joined(separator: "/"))"
+        "ordal.diagram.\(connection).\(path.joined(separator: "/"))"
     }
 
     public static func load(connection: String, path: [String], defaults: UserDefaults = .standard) -> [String: DiagramPoint] {

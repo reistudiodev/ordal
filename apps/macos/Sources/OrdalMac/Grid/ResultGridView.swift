@@ -1,5 +1,5 @@
 import AppKit
-import DBClientKit
+import OrdalKit
 import SwiftUI
 
 /// A virtualised grid over any `GridDataSource`: NSTableView only asks for

@@ -1,5 +1,5 @@
 -- A 1,000,000-row table for the Phase 1 scrolling gate.
---   psql "postgres://postgres:dbclient@127.0.0.1:55432/postgres" -f scripts/seed-1m.sql
+--   psql "postgres://postgres:ordal@127.0.0.1:55432/postgres" -f scripts/seed-1m.sql
 DROP TABLE IF EXISTS public.events_1m;
 CREATE TABLE public.events_1m (
     id         bigint PRIMARY KEY,

@@ -36,6 +36,15 @@ public final class SchemaTabModel: Identifiable {
     private var session: Session
     private let defaults: UserDefaults
 
+    /// For tests: a model over a ready-made graph.
+    init(path: [String], session: Session, graph: SchemaGraph, defaults: UserDefaults) {
+        self.path = path
+        self.session = session
+        self.defaults = defaults
+        self.graph = graph
+        self.positions = SchemaLayout.layout(graph)
+    }
+
     init(path: [String], session: Session, defaults: UserDefaults = .standard) {
         self.path = path
         self.session = session
@@ -70,10 +79,23 @@ public final class SchemaTabModel: Identifiable {
 
     // MARK: Editing the layout
 
-    public func move(_ table: String, to point: DiagramPoint) {
+    /// Moves a card. During a drag pass `persist: false` on every step and
+    /// `true` once at the end, so the layout is written to disk once.
+    public func move(_ table: String, to point: DiagramPoint, persist: Bool = true) {
         positions[table] = DiagramPoint(x: max(0, point.x), y: max(0, point.y))
-        DiagramLayoutStore.save(positions, connection: connectionID, path: path, defaults: defaults)
+        if persist {
+            DiagramLayoutStore.save(positions, connection: connectionID, path: path, defaults: defaults)
+        }
         version += 1
+    }
+
+    /// The topmost visible card containing `point` (later cards draw on top).
+    public func table(at point: DiagramPoint) -> String? {
+        visibleTables.last { t in
+            guard let p = positions[t.name] else { return false }
+            return point.x >= p.x && point.x <= p.x + SchemaLayout.cardWidth
+                && point.y >= p.y && point.y <= p.y + SchemaLayout.cardHeight(t)
+        }?.name
     }
 
     /// Lays everything out again and forgets dragged positions.
@@ -100,12 +122,25 @@ public final class SchemaTabModel: Identifiable {
         return graph.tables.filter { !hidden.contains($0.name) && (keep?.contains($0.name) ?? true) }
     }
 
+    /// Routed connectors, recomputed only when something moved or changed.
     public var edges: [SchemaLayout.Edge] {
+        let key = EdgeKey(version: version, focusOnly: focusOnly, selected: focusOnly ? selected : nil)
+        if let cached = edgeCache, cached.key == key { return cached.edges }
         guard let graph else { return [] }
         let shown = Set(visibleTables.map(\.name))
         let hiddenNow = Set(graph.tables.map(\.name)).subtracting(shown)
-        return SchemaLayout.route(graph, positions: positions, hidden: hiddenNow)
+        let edges = SchemaLayout.route(graph, positions: positions, hidden: hiddenNow)
+        edgeCache = (key, edges)
+        return edges
     }
+
+    private struct EdgeKey: Equatable {
+        let version: Int
+        let focusOnly: Bool
+        let selected: String?
+    }
+
+    @ObservationIgnored private var edgeCache: (key: EdgeKey, edges: [SchemaLayout.Edge])?
 
     /// The focused table and the tables it links to or from.
     public var focusSet: Set<String> {
