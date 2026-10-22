@@ -92,3 +92,137 @@ pub async fn assert_cancels(session: &Session, sql: &str) {
     // The session still works afterwards.
     session.ping().await.unwrap();
 }
+
+use dbclient_core::{CellEdit, PageCursor, SortSpec, TablePage, Value};
+
+/// Every row, walking pages from the first to the last with keyset cursors.
+pub async fn walk_forward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<dbclient_core::Row> {
+    let mut rows = Vec::new();
+    let mut page: TablePage = s.fetch_page(path.to_vec(), PageCursor::First, size, sort.clone()).await.unwrap();
+    loop {
+        assert!(page.rows.len() <= size as usize);
+        rows.extend(page.rows.clone());
+        if !page.has_next {
+            return rows;
+        }
+        let cursor = match &page.last_key {
+            Some(key) => PageCursor::After { key: key.clone() },
+            None => PageCursor::Offset { offset: page.offset.unwrap() + page.rows.len() as u64 },
+        };
+        let next = s.fetch_page(path.to_vec(), cursor, size, sort.clone()).await.unwrap();
+        page = TablePage { offset: next.offset.or(page.offset.map(|o| o + page.rows.len() as u64)), ..next };
+    }
+}
+
+/// Every row, walking backwards from the last page; returned in table order.
+pub async fn walk_backward(s: &Session, path: &[String], size: u32, sort: Option<SortSpec>) -> Vec<dbclient_core::Row> {
+    let mut pages = Vec::new();
+    let mut page = s.fetch_page(path.to_vec(), PageCursor::Last, size, sort.clone()).await.unwrap();
+    loop {
+        pages.push(page.rows.clone());
+        if !page.has_prev {
+            break;
+        }
+        let key = page.first_key.clone().expect("keyset page");
+        page = s.fetch_page(path.to_vec(), PageCursor::Before { key }, size, sort.clone()).await.unwrap();
+    }
+    pages.into_iter().rev().flatten().collect()
+}
+
+pub fn int(v: &Value) -> i64 {
+    match v {
+        Value::Int { v } => *v,
+        other => panic!("not an int: {other:?}"),
+    }
+}
+
+/// The name each test row gets: NULL for every 10th id, else n00..n36.
+pub fn expected_name(id: i64) -> Option<String> {
+    (id % 10 != 0).then(|| format!("n{:02}", id % 37))
+}
+
+/// The paging, sorting and editing contract for a SQL table created with
+/// 1000 rows of `(id int primary key, name varchar(20) null)` using
+/// `expected_name`, plus `dbclient_parent` / `dbclient_child` linked by a
+/// foreign key under `graph_path`.
+pub async fn sql_table_suite(s: &Session, path: Vec<String>, graph_path: Vec<String>) {
+    let ids = |rows: &[dbclient_core::Row]| rows.iter().map(|r| int(&r.cells[0])).collect::<Vec<_>>();
+    let all: Vec<i64> = (1..=1000).collect();
+
+    let meta = s.table_meta(path.clone()).await.unwrap();
+    assert_eq!(meta.key_columns, vec!["id".to_string()]);
+    assert!(meta.editable, "{:?}", meta.read_only_reason);
+    let name_col = meta.columns.iter().find(|c| c.name == "name").unwrap();
+    assert!(name_col.nullable && name_col.editable);
+    assert!(!meta.columns[0].editable, "primary key columns are not editable");
+
+    // Keyset paging both ways visits every row exactly once.
+    assert_eq!(ids(&walk_forward(s, &path, 64, None).await), all);
+    assert_eq!(ids(&walk_backward(s, &path, 64, None).await), all);
+
+    // Sorting by the key itself is key paging in that direction.
+    let desc_ids: Vec<i64> = (1..=1000).rev().collect();
+    let by_id = Some(SortSpec { column: "id".into(), descending: true });
+    assert_eq!(ids(&walk_forward(s, &path, 64, by_id.clone()).await), desc_ids);
+    assert_eq!(ids(&walk_backward(s, &path, 64, by_id).await), desc_ids);
+
+    // Sorted paging: name ascending/descending, NULLs last, id breaks ties.
+    for desc in [false, true] {
+        let mut expected = all.clone();
+        expected.sort_by(|a, b| {
+            let (na, nb) = (expected_name(*a), expected_name(*b));
+            // Ties break on the key in the sort's direction; NULLs always last.
+            let by_id = if desc { b.cmp(a) } else { a.cmp(b) };
+            match (na, nb) {
+                (None, None) => by_id,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (Some(x), Some(y)) => (if desc { y.cmp(&x) } else { x.cmp(&y) }).then(by_id),
+            }
+        });
+        let sort = Some(SortSpec { column: "name".into(), descending: desc });
+        assert_eq!(ids(&walk_forward(s, &path, 50, sort.clone()).await), expected, "forward, desc={desc}");
+        assert_eq!(ids(&walk_backward(s, &path, 50, sort).await), expected, "backward, desc={desc}");
+    }
+
+    // An explicit jump.
+    let page = s.fetch_page(path.clone(), PageCursor::Offset { offset: 500 }, 10, None).await.unwrap();
+    assert_eq!(int(&page.rows[0].cells[0]), 501);
+    assert!(page.has_prev && page.has_next);
+
+    let count = s.row_count(path.clone(), true).await.unwrap();
+    assert_eq!((count.count, count.exact), (1000, true));
+
+    // Edits: quotes and backslashes survive, NULL works, keys come from the page.
+    let first = s.fetch_page(path.clone(), PageCursor::First, 5, None).await.unwrap();
+    let key = first.row_keys[4].clone();
+    assert_eq!(key, vec![Value::Int { v: 5 }]);
+    let tricky = r#"O'Neil "q" \ back"#.to_string();
+    let edits = vec![
+        CellEdit { key: key.clone(), column: "name".into(), value: Value::Text { v: tricky.clone() } },
+        CellEdit { key: vec![Value::Int { v: 6 }], column: "name".into(), value: Value::Null },
+    ];
+    let preview = s.preview_edits(path.clone(), edits.clone()).await.unwrap();
+    assert!(preview[0].starts_with("UPDATE "), "{preview:?}");
+    assert_eq!(s.apply_edits(path.clone(), edits).await.unwrap(), 2);
+    let after = s.fetch_page(path.clone(), PageCursor::First, 6, None).await.unwrap();
+    assert_eq!(after.rows[4].cells[1], Value::Text { v: tricky });
+    assert_eq!(after.rows[5].cells[1], Value::Null);
+
+    // A batch with a missing row saves nothing.
+    let bad = vec![
+        CellEdit { key: vec![Value::Int { v: 7 }], column: "name".into(), value: Value::Text { v: "changed".into() } },
+        CellEdit { key: vec![Value::Int { v: 99_999 }], column: "name".into(), value: Value::Text { v: "x".into() } },
+    ];
+    assert!(s.apply_edits(path.clone(), bad).await.is_err());
+    let row7 = s.fetch_page(path.clone(), PageCursor::Offset { offset: 6 }, 1, None).await.unwrap();
+    assert_eq!(row7.rows[0].cells[1], expected_name(7).map_or(Value::Null, |v| Value::Text { v }));
+
+    // Relations.
+    let graph = s.schema_graph(graph_path).await.unwrap();
+    let rel = graph.relations.iter().find(|r| r.from_table.ends_with("dbclient_child")).expect("child → parent relation");
+    assert!(rel.to_table.ends_with("dbclient_parent"));
+    assert_eq!(rel.from_columns, vec!["parent_id".to_string()]);
+    assert_eq!(rel.to_columns, vec!["id".to_string()]);
+    assert!(!rel.inferred);
+}

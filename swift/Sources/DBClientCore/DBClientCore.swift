@@ -1143,6 +1143,11 @@ public func FfiConverterTypeQueryCursor_lower(_ value: QueryCursor) -> UInt64 {
 public protocol SessionProtocol: AnyObject, Sendable {
     
     /**
+     * Applies staged cell edits in one transaction. Returns how many were applied.
+     */
+    func applyEdits(path: [String], edits: [CellEdit]) async throws  -> UInt64
+    
+    /**
      * Classifies `query` in this engine's language, for confirmation prompts.
      */
     func classify(query: String)  -> StatementKind
@@ -1152,9 +1157,9 @@ public protocol SessionProtocol: AnyObject, Sendable {
     func config()  -> ConnectionConfig
     
     /**
-     * Rows `offset..offset+limit` of a table or view, for table tabs.
+     * One page of a table or collection, optionally sorted on the server.
      */
-    func fetchWindow(path: [String], offset: UInt64, limit: UInt32) async throws  -> Window
+    func fetchPage(path: [String], cursor: PageCursor, size: UInt32, sort: SortSpec?) async throws  -> TablePage
     
     /**
      * Type, TTL and memory of the key at `path` (Redis).
@@ -1172,6 +1177,11 @@ public protocol SessionProtocol: AnyObject, Sendable {
     func ping() async throws  -> Double
     
     /**
+     * The statements `apply_edits` would run, for the review sheet.
+     */
+    func previewEdits(path: [String], edits: [CellEdit]) async throws  -> [String]
+    
+    /**
      * Starts `query` and returns at once. Rows are pulled with
      * [`QueryCursor::next_page`]; errors arrive there too.
      */
@@ -1179,9 +1189,22 @@ public protocol SessionProtocol: AnyObject, Sendable {
     
     func readOnly()  -> Bool
     
-    func rowCount(path: [String]) async throws  -> RowCount
+    /**
+     * The engine's estimate, or an exact count (bounded by a timeout) when `exact`.
+     */
+    func rowCount(path: [String], exact: Bool) async throws  -> RowCount
+    
+    /**
+     * Tables and relations under a schema or database, for the diagram.
+     */
+    func schemaGraph(path: [String]) async throws  -> SchemaGraph
     
     func serverInfo() async throws  -> ServerInfo
+    
+    /**
+     * Column types, keys and editability of a table or collection.
+     */
+    func tableMeta(path: [String]) async throws  -> TableMeta
     
 }
 /**
@@ -1241,6 +1264,25 @@ open class Session: SessionProtocol, @unchecked Sendable {
 
     
     /**
+     * Applies staged cell edits in one transaction. Returns how many were applied.
+     */
+open func applyEdits(path: [String], edits: [CellEdit])async throws  -> UInt64  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_apply_edits(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterSequenceTypeCellEdit.lower(edits)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_u64,
+            completeFunc: ffi_dbclient_core_rust_future_complete_u64,
+            freeFunc: ffi_dbclient_core_rust_future_free_u64,
+            liftFunc: FfiConverterUInt64.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Classifies `query` in this engine's language, for confirmation prompts.
      */
 open func classify(query: String) -> StatementKind  {
@@ -1280,20 +1322,20 @@ open func config() -> ConnectionConfig  {
 }
     
     /**
-     * Rows `offset..offset+limit` of a table or view, for table tabs.
+     * One page of a table or collection, optionally sorted on the server.
      */
-open func fetchWindow(path: [String], offset: UInt64, limit: UInt32)async throws  -> Window  {
+open func fetchPage(path: [String], cursor: PageCursor, size: UInt32, sort: SortSpec?)async throws  -> TablePage  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_dbclient_core_fn_method_session_fetch_window(
-                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterUInt64.lower(offset),FfiConverterUInt32.lower(limit)
+                uniffi_dbclient_core_fn_method_session_fetch_page(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterTypePageCursor_lower(cursor),FfiConverterUInt32.lower(size),FfiConverterOptionTypeSortSpec.lower(sort)
                 )
             },
             pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
             completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
             freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeWindow_lift,
+            liftFunc: FfiConverterTypeTablePage_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1356,6 +1398,25 @@ open func ping()async throws  -> Double  {
 }
     
     /**
+     * The statements `apply_edits` would run, for the review sheet.
+     */
+open func previewEdits(path: [String], edits: [CellEdit])async throws  -> [String]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_preview_edits(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterSequenceTypeCellEdit.lower(edits)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceString.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
      * Starts `query` and returns at once. Rows are pulled with
      * [`QueryCursor::next_page`]; errors arrive there too.
      */
@@ -1379,18 +1440,40 @@ open func readOnly() -> Bool  {
 })
 }
     
-open func rowCount(path: [String])async throws  -> RowCount  {
+    /**
+     * The engine's estimate, or an exact count (bounded by a timeout) when `exact`.
+     */
+open func rowCount(path: [String], exact: Bool)async throws  -> RowCount  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_dbclient_core_fn_method_session_row_count(
-                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path),FfiConverterBool.lower(exact)
                 )
             },
             pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
             completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
             freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeRowCount_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Tables and relations under a schema or database, for the diagram.
+     */
+open func schemaGraph(path: [String])async throws  -> SchemaGraph  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_schema_graph(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSchemaGraph_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1407,6 +1490,25 @@ open func serverInfo()async throws  -> ServerInfo  {
             completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
             freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeServerInfo_lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
+}
+    
+    /**
+     * Column types, keys and editability of a table or collection.
+     */
+open func tableMeta(path: [String])async throws  -> TableMeta  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_dbclient_core_fn_method_session_table_meta(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(path)
+                )
+            },
+            pollFunc: ffi_dbclient_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_dbclient_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_dbclient_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeTableMeta_lift,
             errorHandler: FfiConverterTypeCoreError_lift
         )
 }
@@ -1530,6 +1632,67 @@ public func FfiConverterTypeBrowseNode_lower(_ value: BrowseNode) -> RustBuffer 
 }
 
 
+/**
+ * One staged change: set `column` of the row identified by `key` to `value`.
+ */
+public struct CellEdit: Equatable, Hashable {
+    public var key: [Value]
+    public var column: String
+    public var value: Value
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: [Value], column: String, value: Value) {
+        self.key = key
+        self.column = column
+        self.value = value
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CellEdit: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCellEdit: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CellEdit {
+        return
+            try CellEdit(
+                key: FfiConverterSequenceTypeValue.read(from: &buf), 
+                column: FfiConverterString.read(from: &buf), 
+                value: FfiConverterTypeValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CellEdit, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeValue.write(value.key, into: &buf)
+        FfiConverterString.write(value.column, into: &buf)
+        FfiConverterTypeValue.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCellEdit_lift(_ buf: RustBuffer) throws -> CellEdit {
+    return try FfiConverterTypeCellEdit.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCellEdit_lower(_ value: CellEdit) -> RustBuffer {
+    return FfiConverterTypeCellEdit.lower(value)
+}
+
+
 public struct ColumnInfo: Equatable, Hashable {
     public var name: String
     /**
@@ -1591,6 +1754,112 @@ public func FfiConverterTypeColumnInfo_lift(_ buf: RustBuffer) throws -> ColumnI
 #endif
 public func FfiConverterTypeColumnInfo_lower(_ value: ColumnInfo) -> RustBuffer {
     return FfiConverterTypeColumnInfo.lower(value)
+}
+
+
+public struct ColumnMeta: Equatable, Hashable {
+    public var name: String
+    /**
+     * The full declared type, e.g. `character varying(20)`, `int unsigned`.
+     */
+    public var typeName: String
+    public var kind: ValueKind
+    public var nullable: Bool
+    public var isKey: Bool
+    public var hasDefault: Bool
+    /**
+     * Allowed values for enum / set columns.
+     */
+    public var enumValues: [String]
+    /**
+     * False for generated, identity-always and key columns.
+     */
+    public var editable: Bool
+    /**
+     * Leads an index, so sorting by it stays fast on big tables.
+     */
+    public var indexed: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, 
+        /**
+         * The full declared type, e.g. `character varying(20)`, `int unsigned`.
+         */typeName: String, kind: ValueKind, nullable: Bool, isKey: Bool, hasDefault: Bool, 
+        /**
+         * Allowed values for enum / set columns.
+         */enumValues: [String], 
+        /**
+         * False for generated, identity-always and key columns.
+         */editable: Bool, 
+        /**
+         * Leads an index, so sorting by it stays fast on big tables.
+         */indexed: Bool) {
+        self.name = name
+        self.typeName = typeName
+        self.kind = kind
+        self.nullable = nullable
+        self.isKey = isKey
+        self.hasDefault = hasDefault
+        self.enumValues = enumValues
+        self.editable = editable
+        self.indexed = indexed
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ColumnMeta: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeColumnMeta: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ColumnMeta {
+        return
+            try ColumnMeta(
+                name: FfiConverterString.read(from: &buf), 
+                typeName: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeValueKind.read(from: &buf), 
+                nullable: FfiConverterBool.read(from: &buf), 
+                isKey: FfiConverterBool.read(from: &buf), 
+                hasDefault: FfiConverterBool.read(from: &buf), 
+                enumValues: FfiConverterSequenceString.read(from: &buf), 
+                editable: FfiConverterBool.read(from: &buf), 
+                indexed: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ColumnMeta, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.typeName, into: &buf)
+        FfiConverterTypeValueKind.write(value.kind, into: &buf)
+        FfiConverterBool.write(value.nullable, into: &buf)
+        FfiConverterBool.write(value.isKey, into: &buf)
+        FfiConverterBool.write(value.hasDefault, into: &buf)
+        FfiConverterSequenceString.write(value.enumValues, into: &buf)
+        FfiConverterBool.write(value.editable, into: &buf)
+        FfiConverterBool.write(value.indexed, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeColumnMeta_lift(_ buf: RustBuffer) throws -> ColumnMeta {
+    return try FfiConverterTypeColumnMeta.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeColumnMeta_lower(_ value: ColumnMeta) -> RustBuffer {
+    return FfiConverterTypeColumnMeta.lower(value)
 }
 
 
@@ -1714,6 +1983,142 @@ public func FfiConverterTypeConnectionConfig_lift(_ buf: RustBuffer) throws -> C
 #endif
 public func FfiConverterTypeConnectionConfig_lower(_ value: ConnectionConfig) -> RustBuffer {
     return FfiConverterTypeConnectionConfig.lower(value)
+}
+
+
+public struct GraphColumn: Equatable, Hashable {
+    public var name: String
+    public var typeName: String
+    public var isKey: Bool
+    public var nullable: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, typeName: String, isKey: Bool, nullable: Bool) {
+        self.name = name
+        self.typeName = typeName
+        self.isKey = isKey
+        self.nullable = nullable
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GraphColumn: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGraphColumn: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GraphColumn {
+        return
+            try GraphColumn(
+                name: FfiConverterString.read(from: &buf), 
+                typeName: FfiConverterString.read(from: &buf), 
+                isKey: FfiConverterBool.read(from: &buf), 
+                nullable: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GraphColumn, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.typeName, into: &buf)
+        FfiConverterBool.write(value.isKey, into: &buf)
+        FfiConverterBool.write(value.nullable, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGraphColumn_lift(_ buf: RustBuffer) throws -> GraphColumn {
+    return try FfiConverterTypeGraphColumn.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGraphColumn_lower(_ value: GraphColumn) -> RustBuffer {
+    return FfiConverterTypeGraphColumn.lower(value)
+}
+
+
+public struct GraphTable: Equatable, Hashable {
+    /**
+     * Unique within the graph (schema-qualified when outside the schema shown).
+     */
+    public var name: String
+    /**
+     * The browse path that opens this table.
+     */
+    public var path: [String]
+    public var columns: [GraphColumn]
+    public var estimatedRows: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unique within the graph (schema-qualified when outside the schema shown).
+         */name: String, 
+        /**
+         * The browse path that opens this table.
+         */path: [String], columns: [GraphColumn], estimatedRows: UInt64?) {
+        self.name = name
+        self.path = path
+        self.columns = columns
+        self.estimatedRows = estimatedRows
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GraphTable: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGraphTable: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GraphTable {
+        return
+            try GraphTable(
+                name: FfiConverterString.read(from: &buf), 
+                path: FfiConverterSequenceString.read(from: &buf), 
+                columns: FfiConverterSequenceTypeGraphColumn.read(from: &buf), 
+                estimatedRows: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GraphTable, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterSequenceString.write(value.path, into: &buf)
+        FfiConverterSequenceTypeGraphColumn.write(value.columns, into: &buf)
+        FfiConverterOptionUInt64.write(value.estimatedRows, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGraphTable_lift(_ buf: RustBuffer) throws -> GraphTable {
+    return try FfiConverterTypeGraphTable.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGraphTable_lower(_ value: GraphTable) -> RustBuffer {
+    return FfiConverterTypeGraphTable.lower(value)
 }
 
 
@@ -1988,6 +2393,82 @@ public func FfiConverterTypeParsedConnection_lower(_ value: ParsedConnection) ->
 }
 
 
+public struct Relation: Equatable, Hashable {
+    public var name: String
+    public var fromTable: String
+    public var fromColumns: [String]
+    public var toTable: String
+    public var toColumns: [String]
+    /**
+     * True when guessed from data (MongoDB) rather than a declared foreign key.
+     */
+    public var inferred: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, fromTable: String, fromColumns: [String], toTable: String, toColumns: [String], 
+        /**
+         * True when guessed from data (MongoDB) rather than a declared foreign key.
+         */inferred: Bool) {
+        self.name = name
+        self.fromTable = fromTable
+        self.fromColumns = fromColumns
+        self.toTable = toTable
+        self.toColumns = toColumns
+        self.inferred = inferred
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Relation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRelation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Relation {
+        return
+            try Relation(
+                name: FfiConverterString.read(from: &buf), 
+                fromTable: FfiConverterString.read(from: &buf), 
+                fromColumns: FfiConverterSequenceString.read(from: &buf), 
+                toTable: FfiConverterString.read(from: &buf), 
+                toColumns: FfiConverterSequenceString.read(from: &buf), 
+                inferred: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Relation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.fromTable, into: &buf)
+        FfiConverterSequenceString.write(value.fromColumns, into: &buf)
+        FfiConverterString.write(value.toTable, into: &buf)
+        FfiConverterSequenceString.write(value.toColumns, into: &buf)
+        FfiConverterBool.write(value.inferred, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRelation_lift(_ buf: RustBuffer) throws -> Relation {
+    return try FfiConverterTypeRelation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRelation_lower(_ value: Relation) -> RustBuffer {
+    return FfiConverterTypeRelation.lower(value)
+}
+
+
 public struct Row: Equatable, Hashable {
     public var cells: [Value]
 
@@ -2098,6 +2579,60 @@ public func FfiConverterTypeRowCount_lower(_ value: RowCount) -> RustBuffer {
 }
 
 
+public struct SchemaGraph: Equatable, Hashable {
+    public var tables: [GraphTable]
+    public var relations: [Relation]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(tables: [GraphTable], relations: [Relation]) {
+        self.tables = tables
+        self.relations = relations
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SchemaGraph: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaGraph: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaGraph {
+        return
+            try SchemaGraph(
+                tables: FfiConverterSequenceTypeGraphTable.read(from: &buf), 
+                relations: FfiConverterSequenceTypeRelation.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaGraph, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeGraphTable.write(value.tables, into: &buf)
+        FfiConverterSequenceTypeRelation.write(value.relations, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaGraph_lift(_ buf: RustBuffer) throws -> SchemaGraph {
+    return try FfiConverterTypeSchemaGraph.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaGraph_lower(_ value: SchemaGraph) -> RustBuffer {
+    return FfiConverterTypeSchemaGraph.lower(value)
+}
+
+
 public struct ServerInfo: Equatable, Hashable {
     /**
      * e.g. "PostgreSQL", "MariaDB", "Redis".
@@ -2155,6 +2690,245 @@ public func FfiConverterTypeServerInfo_lift(_ buf: RustBuffer) throws -> ServerI
 #endif
 public func FfiConverterTypeServerInfo_lower(_ value: ServerInfo) -> RustBuffer {
     return FfiConverterTypeServerInfo.lower(value)
+}
+
+
+/**
+ * A server-side sort chosen from a column header.
+ */
+public struct SortSpec: Equatable, Hashable {
+    public var column: String
+    public var descending: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(column: String, descending: Bool) {
+        self.column = column
+        self.descending = descending
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SortSpec: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSortSpec: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SortSpec {
+        return
+            try SortSpec(
+                column: FfiConverterString.read(from: &buf), 
+                descending: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SortSpec, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.column, into: &buf)
+        FfiConverterBool.write(value.descending, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSortSpec_lift(_ buf: RustBuffer) throws -> SortSpec {
+    return try FfiConverterTypeSortSpec.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSortSpec_lower(_ value: SortSpec) -> RustBuffer {
+    return FfiConverterTypeSortSpec.lower(value)
+}
+
+
+public struct TableMeta: Equatable, Hashable {
+    public var columns: [ColumnMeta]
+    public var paging: PagingMode
+    /**
+     * The columns that identify a row for edits (`_id` for MongoDB).
+     */
+    public var keyColumns: [String]
+    /**
+     * Whether cells can be edited at all.
+     */
+    public var editable: Bool
+    /**
+     * Why editing is off, for the UI.
+     */
+    public var readOnlyReason: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(columns: [ColumnMeta], paging: PagingMode, 
+        /**
+         * The columns that identify a row for edits (`_id` for MongoDB).
+         */keyColumns: [String], 
+        /**
+         * Whether cells can be edited at all.
+         */editable: Bool, 
+        /**
+         * Why editing is off, for the UI.
+         */readOnlyReason: String?) {
+        self.columns = columns
+        self.paging = paging
+        self.keyColumns = keyColumns
+        self.editable = editable
+        self.readOnlyReason = readOnlyReason
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TableMeta: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTableMeta: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TableMeta {
+        return
+            try TableMeta(
+                columns: FfiConverterSequenceTypeColumnMeta.read(from: &buf), 
+                paging: FfiConverterTypePagingMode.read(from: &buf), 
+                keyColumns: FfiConverterSequenceString.read(from: &buf), 
+                editable: FfiConverterBool.read(from: &buf), 
+                readOnlyReason: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TableMeta, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeColumnMeta.write(value.columns, into: &buf)
+        FfiConverterTypePagingMode.write(value.paging, into: &buf)
+        FfiConverterSequenceString.write(value.keyColumns, into: &buf)
+        FfiConverterBool.write(value.editable, into: &buf)
+        FfiConverterOptionString.write(value.readOnlyReason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTableMeta_lift(_ buf: RustBuffer) throws -> TableMeta {
+    return try FfiConverterTypeTableMeta.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTableMeta_lower(_ value: TableMeta) -> RustBuffer {
+    return FfiConverterTypeTableMeta.lower(value)
+}
+
+
+public struct TablePage: Equatable, Hashable {
+    public var columns: [ColumnInfo]
+    public var rows: [Row]
+    /**
+     * The edit key of each row, in row order. Empty when rows can't be edited.
+     */
+    public var rowKeys: [[Value]]
+    /**
+     * Paging keys for `PageCursor::Before` / `After` (the sort value first
+     * when sorted, then the key). None in OFFSET mode.
+     */
+    public var firstKey: [Value]?
+    public var lastKey: [Value]?
+    public var hasPrev: Bool
+    public var hasNext: Bool
+    /**
+     * Offset of the first row, when known (first page, OFFSET jumps).
+     */
+    public var offset: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(columns: [ColumnInfo], rows: [Row], 
+        /**
+         * The edit key of each row, in row order. Empty when rows can't be edited.
+         */rowKeys: [[Value]], 
+        /**
+         * Paging keys for `PageCursor::Before` / `After` (the sort value first
+         * when sorted, then the key). None in OFFSET mode.
+         */firstKey: [Value]?, lastKey: [Value]?, hasPrev: Bool, hasNext: Bool, 
+        /**
+         * Offset of the first row, when known (first page, OFFSET jumps).
+         */offset: UInt64?) {
+        self.columns = columns
+        self.rows = rows
+        self.rowKeys = rowKeys
+        self.firstKey = firstKey
+        self.lastKey = lastKey
+        self.hasPrev = hasPrev
+        self.hasNext = hasNext
+        self.offset = offset
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TablePage: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTablePage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TablePage {
+        return
+            try TablePage(
+                columns: FfiConverterSequenceTypeColumnInfo.read(from: &buf), 
+                rows: FfiConverterSequenceTypeRow.read(from: &buf), 
+                rowKeys: FfiConverterSequenceSequenceTypeValue.read(from: &buf), 
+                firstKey: FfiConverterOptionSequenceTypeValue.read(from: &buf), 
+                lastKey: FfiConverterOptionSequenceTypeValue.read(from: &buf), 
+                hasPrev: FfiConverterBool.read(from: &buf), 
+                hasNext: FfiConverterBool.read(from: &buf), 
+                offset: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TablePage, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeColumnInfo.write(value.columns, into: &buf)
+        FfiConverterSequenceTypeRow.write(value.rows, into: &buf)
+        FfiConverterSequenceSequenceTypeValue.write(value.rowKeys, into: &buf)
+        FfiConverterOptionSequenceTypeValue.write(value.firstKey, into: &buf)
+        FfiConverterOptionSequenceTypeValue.write(value.lastKey, into: &buf)
+        FfiConverterBool.write(value.hasPrev, into: &buf)
+        FfiConverterBool.write(value.hasNext, into: &buf)
+        FfiConverterOptionUInt64.write(value.offset, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTablePage_lift(_ buf: RustBuffer) throws -> TablePage {
+    return try FfiConverterTypeTablePage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTablePage_lower(_ value: TablePage) -> RustBuffer {
+    return FfiConverterTypeTablePage.lower(value)
 }
 
 
@@ -2699,6 +3473,189 @@ public func FfiConverterTypeNodeKind_lift(_ buf: RustBuffer) throws -> NodeKind 
 #endif
 public func FfiConverterTypeNodeKind_lower(_ value: NodeKind) -> RustBuffer {
     return FfiConverterTypeNodeKind.lower(value)
+}
+
+
+
+/**
+ * Where a page starts.
+ */
+
+public enum PageCursor: Equatable, Hashable {
+    
+    case first
+    case last
+    /**
+     * Rows after this paging key (the previous page's `last_key`).
+     */
+    case after(key: [Value]
+    )
+    /**
+     * Rows before this paging key (the next page's `first_key`).
+     */
+    case before(key: [Value]
+    )
+    /**
+     * An explicit jump. Cost grows with the offset on every engine.
+     */
+    case offset(offset: UInt64
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PageCursor: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePageCursor: FfiConverterRustBuffer {
+    typealias SwiftType = PageCursor
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PageCursor {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .first
+        
+        case 2: return .last
+        
+        case 3: return .after(key: try FfiConverterSequenceTypeValue.read(from: &buf)
+        )
+        
+        case 4: return .before(key: try FfiConverterSequenceTypeValue.read(from: &buf)
+        )
+        
+        case 5: return .offset(offset: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PageCursor, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .first:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .last:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .after(key):
+            writeInt(&buf, Int32(3))
+            FfiConverterSequenceTypeValue.write(key, into: &buf)
+            
+        
+        case let .before(key):
+            writeInt(&buf, Int32(4))
+            FfiConverterSequenceTypeValue.write(key, into: &buf)
+            
+        
+        case let .offset(offset):
+            writeInt(&buf, Int32(5))
+            FfiConverterUInt64.write(offset, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePageCursor_lift(_ buf: RustBuffer) throws -> PageCursor {
+    return try FfiConverterTypePageCursor.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePageCursor_lower(_ value: PageCursor) -> RustBuffer {
+    return FfiConverterTypePageCursor.lower(value)
+}
+
+
+
+/**
+ * How a table's pages are addressed.
+ */
+
+public enum PagingMode: Equatable, Hashable {
+    
+    /**
+     * Keyset on the primary key (or `_id`, `rowid`, `ctid`).
+     */
+    case keyset
+    /**
+     * No usable key: OFFSET only. Deep pages get slow on big tables.
+     */
+    case offset
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PagingMode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePagingMode: FfiConverterRustBuffer {
+    typealias SwiftType = PagingMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PagingMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .keyset
+        
+        case 2: return .offset
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PagingMode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .keyset:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .offset:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePagingMode_lift(_ buf: RustBuffer) throws -> PagingMode {
+    return try FfiConverterTypePagingMode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePagingMode_lower(_ value: PagingMode) -> RustBuffer {
+    return FfiConverterTypePagingMode.lower(value)
 }
 
 
@@ -3309,6 +4266,54 @@ fileprivate struct FfiConverterOptionTypeConnectionConfig: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSortSpec: FfiConverterRustBuffer {
+    typealias SwiftType = SortSpec?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSortSpec.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSortSpec.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceTypeValue: FfiConverterRustBuffer {
+    typealias SwiftType = [Value]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceTypeValue.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceTypeValue.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -3359,6 +4364,31 @@ fileprivate struct FfiConverterSequenceTypeBrowseNode: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeCellEdit: FfiConverterRustBuffer {
+    typealias SwiftType = [CellEdit]
+
+    public static func write(_ value: [CellEdit], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCellEdit.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CellEdit] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CellEdit]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCellEdit.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeColumnInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ColumnInfo]
 
@@ -3376,6 +4406,31 @@ fileprivate struct FfiConverterSequenceTypeColumnInfo: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeColumnInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeColumnMeta: FfiConverterRustBuffer {
+    typealias SwiftType = [ColumnMeta]
+
+    public static func write(_ value: [ColumnMeta], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeColumnMeta.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ColumnMeta] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ColumnMeta]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeColumnMeta.read(from: &buf))
         }
         return seq
     }
@@ -3409,6 +4464,56 @@ fileprivate struct FfiConverterSequenceTypeConnectionConfig: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeGraphColumn: FfiConverterRustBuffer {
+    typealias SwiftType = [GraphColumn]
+
+    public static func write(_ value: [GraphColumn], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGraphColumn.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GraphColumn] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GraphColumn]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGraphColumn.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGraphTable: FfiConverterRustBuffer {
+    typealias SwiftType = [GraphTable]
+
+    public static func write(_ value: [GraphTable], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGraphTable.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GraphTable] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GraphTable]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGraphTable.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeHistoryEntry: FfiConverterRustBuffer {
     typealias SwiftType = [HistoryEntry]
 
@@ -3426,6 +4531,31 @@ fileprivate struct FfiConverterSequenceTypeHistoryEntry: FfiConverterRustBuffer 
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeHistoryEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRelation: FfiConverterRustBuffer {
+    typealias SwiftType = [Relation]
+
+    public static func write(_ value: [Relation], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRelation.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Relation] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Relation]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRelation.read(from: &buf))
         }
         return seq
     }
@@ -3476,6 +4606,31 @@ fileprivate struct FfiConverterSequenceTypeValue: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeValue.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceSequenceTypeValue: FfiConverterRustBuffer {
+    typealias SwiftType = [[Value]]
+
+    public static func write(_ value: [[Value]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceTypeValue.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[Value]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[Value]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceTypeValue.read(from: &buf))
         }
         return seq
     }
@@ -3657,6 +4812,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dbclient_core_checksum_method_querycursor_rows_affected() != 28816) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_dbclient_core_checksum_method_session_apply_edits() != 48891) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_dbclient_core_checksum_method_session_classify() != 40681) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3666,7 +4824,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dbclient_core_checksum_method_session_config() != 48917) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_fetch_window() != 7477) {
+    if (uniffi_dbclient_core_checksum_method_session_fetch_page() != 59184) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dbclient_core_checksum_method_session_key_info() != 7508) {
@@ -3678,16 +4836,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_dbclient_core_checksum_method_session_ping() != 1188) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_dbclient_core_checksum_method_session_preview_edits() != 12876) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_dbclient_core_checksum_method_session_query() != 19387) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dbclient_core_checksum_method_session_read_only() != 22680) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_dbclient_core_checksum_method_session_row_count() != 31641) {
+    if (uniffi_dbclient_core_checksum_method_session_row_count() != 28777) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_schema_graph() != 35266) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dbclient_core_checksum_method_session_server_info() != 38716) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_dbclient_core_checksum_method_session_table_meta() != 4362) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_dbclient_core_checksum_constructor_connectionmanager_new() != 14515) {

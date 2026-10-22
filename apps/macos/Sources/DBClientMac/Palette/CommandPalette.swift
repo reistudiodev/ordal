@@ -96,10 +96,16 @@ enum PaletteCommands {
                 PaletteCommand(id: "disconnect", title: "Disconnect", subtitle: ws.config.name) {
                     Task { await app.disconnect(ws.id) }
                 },
+                PaletteCommand(id: "reconnect", title: "Reconnect", subtitle: ws.config.name, shortcut: "⇧⌘R") {
+                    Task { await ws.reconnect() }
+                },
+                PaletteCommand(id: "open-sql", title: "Open SQL File…", shortcut: "⌘O") { QueryFiles.open(in: ws) },
                 PaletteCommand(id: "edit", title: "Edit Connection…", subtitle: ws.config.name) { app.edit(ws.config) },
             ]
-            if let q = ws.activeQuery {
+            if let q = ws.activeEditor {
                 list += [
+                    PaletteCommand(id: "save", title: "Save Query", shortcut: "⌘S") { QueryFiles.save(q) },
+                    PaletteCommand(id: "save-as", title: "Save Query As…", shortcut: "⇧⌘S") { QueryFiles.saveAs(q) },
                     PaletteCommand(id: "run", title: "Run Query", shortcut: "⌘↵") { Task { await q.run() } },
                     PaletteCommand(id: "cancel", title: "Cancel Query", shortcut: "⌘.") { q.cancel() },
                 ]
@@ -109,6 +115,11 @@ enum PaletteCommands {
             }
             if let id = ws.selectedTabID {
                 list.append(PaletteCommand(id: "close-tab", title: "Close Tab", shortcut: "⇧⌘W") { ws.closeTab(id) })
+            }
+            for node in ws.browser.loadedNodes {
+                if let path = ws.relationsPath(for: node) {
+                    list.append(PaletteCommand(id: "rel:" + node.id, title: "View Relations of \(node.name)") { ws.openSchema(path: path) })
+                }
             }
             for node in ws.browser.loadedNodes where node.opensAsTable {
                 list.append(PaletteCommand(id: "open:" + node.id, title: "Open \(node.name)",

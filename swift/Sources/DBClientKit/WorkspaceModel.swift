@@ -7,11 +7,13 @@ public final class WorkspaceModel: Identifiable {
     public enum Tab: Identifiable {
         case query(QueryTabModel)
         case table(TableTabModel)
+        case schema(SchemaTabModel)
 
         public var id: UUID {
             switch self {
             case .query(let q): q.id
             case .table(let t): t.id
+            case .schema(let s): s.id
             }
         }
 
@@ -19,26 +21,39 @@ public final class WorkspaceModel: Identifiable {
             switch self {
             case .query(let q): q.title
             case .table(let t): t.title
+            case .schema(let s): s.title
             }
         }
     }
 
-    /// The cell shown in the inspector.
+    public enum ConnectionState: Equatable {
+        case connected
+        case lost(String)
+        case reconnecting
+    }
+
+    /// The cell shown (and, for table tabs, edited) in the inspector.
     public struct InspectedCell: Equatable {
         public let column: ColumnInfo
         public let value: Value
         public let row: Int
+        public let columnIndex: Int
+        /// The table tab the cell came from; nil for query results (read-only).
+        public let tableTab: UUID?
 
-        public init(column: ColumnInfo, value: Value, row: Int) {
+        public init(column: ColumnInfo, value: Value, row: Int, columnIndex: Int, tableTab: UUID? = nil) {
             self.column = column
             self.value = value
             self.row = row
+            self.columnIndex = columnIndex
+            self.tableTab = tableTab
         }
     }
 
     public let config: ConnectionConfig
-    public let session: Session
+    public private(set) var session: Session
     public let browser: BrowserModel
+    public private(set) var state: ConnectionState = .connected
     public private(set) var tabs: [Tab] = []
     public var selectedTabID: UUID?
     public private(set) var serverInfo: ServerInfo?
@@ -65,7 +80,45 @@ public final class WorkspaceModel: Identifiable {
     }
 
     public func refreshLatency() async {
-        latencyMs = try? await session.ping()
+        do {
+            latencyMs = try await session.ping()
+            if case .lost = state { state = .connected }
+        } catch {
+            latencyMs = nil
+            if state != .reconnecting { state = .lost(describe(error)) }
+        }
+    }
+
+    /// Opens a fresh session and moves every tab and the browser onto it.
+    /// Tabs, editor text and staged edits are kept.
+    public func reconnect() async {
+        state = .reconnecting
+        do {
+            let fresh = try await manager.open(id: config.id)
+            let old = session
+            session = fresh
+            browser.rebind(fresh)
+            for tab in tabs {
+                switch tab {
+                case .query(let q): q.session = fresh
+                case .table(let t): t.rebind(fresh)
+                case .schema(let s): s.rebind(fresh)
+                }
+            }
+            state = .connected
+            Task { await old.close() }
+            serverInfo = try? await fresh.serverInfo()
+            await browser.loadRoots()
+            await refreshLatency()
+        } catch {
+            state = .lost(describe(error))
+        }
+    }
+
+    private func watch(_ tab: QueryTabModel) {
+        tab.onConnectionLost = { [weak self] message in
+            self?.state = .lost(message)
+        }
     }
 
     public var selectedTab: Tab? {
@@ -82,12 +135,23 @@ public final class WorkspaceModel: Identifiable {
         return nil
     }
 
+    /// The editor that ⌘↵, ⌘S and Format act on: a query tab, or a table
+    /// tab showing its Query segment.
+    public var activeEditor: QueryTabModel? {
+        switch selectedTab {
+        case .query(let q): q
+        case .table(let t) where t.segment == .query: t.query
+        default: nil
+        }
+    }
+
     @discardableResult
     public func newQueryTab(text: String = "", database: String? = nil) -> QueryTabModel {
         queryCounter += 1
         let tab = QueryTabModel(title: "Query \(queryCounter)", text: text, session: session, manager: manager)
         tab.database = database
         tab.loadHistory()
+        watch(tab)
         tabs.append(.query(tab))
         selectedTabID = tab.id
         return tab
@@ -95,19 +159,56 @@ public final class WorkspaceModel: Identifiable {
 
     /// Opens (or switches to) the data tab for a table, view or collection.
     public func openTable(_ node: TreeNode) {
-        if let existing = tabs.first(where: { if case .table(let t) = $0 { t.path == node.path } else { false } }) {
+        openTable(path: node.path, kind: node.kind)
+    }
+
+    /// Opens (or switches to) the data tab for the relation at `path`.
+    public func openTable(path: [String], kind: NodeKind) {
+        if let existing = tabs.first(where: { if case .table(let t) = $0 { t.path == path } else { false } }) {
             selectedTabID = existing.id
             return
         }
-        let tab = TableTabModel(path: node.path, kind: node.kind, session: session)
+        let tab = TableTabModel(
+            path: path, kind: kind, starter: starterQuery(path: path, kind: kind, detail: nil),
+            database: database(for: path), session: session, manager: manager)
+        watch(tab.query)
         tabs.append(.table(tab))
         selectedTabID = tab.id
         Task { await tab.start() }
     }
 
+    /// Opens (or switches to) the relations diagram for a schema or database.
+    public func openSchema(path: [String]) {
+        if let existing = tabs.first(where: { if case .schema(let s) = $0 { s.path == path } else { false } }) {
+            selectedTabID = existing.id
+            return
+        }
+        let tab = SchemaTabModel(path: path, session: session)
+        tabs.append(.schema(tab))
+        selectedTabID = tab.id
+        Task { await tab.start() }
+    }
+
+    /// The browse path whose relations make sense to draw for `node`.
+    public func relationsPath(for node: TreeNode) -> [String]? {
+        switch (config.kind, node.kind) {
+        case (.postgres, .schema), (.mySql, .database), (.sqlite, .database), (.mongoDb, .database): node.path
+        default: nil
+        }
+    }
+
+    /// Opens a `.sql` file in a new query tab.
+    public func openFile(_ url: URL) throws {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let tab = newQueryTab(text: text)
+        tab.title = url.deletingPathExtension().lastPathComponent
+        tab.loaded(from: url)
+    }
+
     public func closeTab(_ id: UUID) {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         if case .query(let q) = tabs[i] { q.cancel() }
+        if case .table(let t) = tabs[i] { t.query.cancel() }
         tabs.remove(at: i)
         if selectedTabID == id {
             selectedTabID = tabs.isEmpty ? nil : tabs[min(i, tabs.count - 1)].id

@@ -43,9 +43,13 @@ public final class BrowserModel {
     public private(set) var error: String?
     public var filter = ""
 
-    private let session: Session
+    private var session: Session
 
     public init(session: Session) {
+        self.session = session
+    }
+
+    func rebind(_ session: Session) {
         self.session = session
     }
 

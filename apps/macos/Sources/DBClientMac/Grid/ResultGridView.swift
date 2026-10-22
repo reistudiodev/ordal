@@ -8,7 +8,12 @@ struct ResultGridView: NSViewRepresentable {
     let source: any GridDataSource
     /// Passed so SwiftUI calls `updateNSView` whenever the source changes.
     let version: Int
-    var onSelectCell: (ColumnInfo, Value, Int) -> Void = { _, _, _ in }
+    /// Row and column index of a clicked cell.
+    var onSelectCell: (Int, Int) -> Void = { _, _ in }
+    /// Double-click or Return on a cell (opens the editor).
+    var onActivateCell: (Int, Int) -> Void = { _, _ in }
+    /// A header click; nil disables sorting.
+    var onSortColumn: ((String) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let table = GridTableView()
@@ -26,6 +31,7 @@ struct ResultGridView: NSViewRepresentable {
         table.delegate = context.coordinator
         table.target = context.coordinator
         table.action = #selector(Coordinator.clicked(_:))
+        table.doubleAction = #selector(Coordinator.doubleClicked(_:))
         table.coordinator = context.coordinator
         table.setAccessibilityLabel("Results")
 
@@ -65,8 +71,10 @@ struct ResultGridView: NSViewRepresentable {
                 rebuildColumns(new.columns)
                 shownRows = new.rowCount
                 table.reloadData()
+                showSort(new.sort)
                 return
             }
+            showSort(new.sort)
             if new.rowCount != shownRows {
                 shownRows = new.rowCount
                 table.noteNumberOfRowsChanged()
@@ -77,6 +85,28 @@ struct ResultGridView: NSViewRepresentable {
                 table.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
                                  columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
             }
+        }
+
+        /// Header arrows for the current sort.
+        private func showSort(_ sort: GridSort?) {
+            guard let table else { return }
+            for (i, tc) in table.tableColumns.enumerated() {
+                let index = Int(tc.identifier.rawValue) ?? i
+                let name = index < shownColumns.count ? shownColumns[index].name : ""
+                let image: NSImage? = sort?.column == name
+                    ? NSImage(named: sort!.descending ? "NSDescendingSortIndicator" : "NSAscendingSortIndicator")
+                    : nil
+                if table.indicatorImage(in: tc) != image { table.setIndicatorImage(image, in: tc) }
+            }
+            table.highlightedTableColumn = table.tableColumns.first { tc in
+                let index = Int(tc.identifier.rawValue) ?? -1
+                return index < shownColumns.count && shownColumns[index].name == sort?.column
+            }
+        }
+
+        func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
+            guard let onSort = parent.onSortColumn, let i = Int(tableColumn.identifier.rawValue), i < shownColumns.count else { return }
+            onSort(shownColumns[i].name)
         }
 
         private func rebuildColumns(_ columns: [ColumnInfo]) {
@@ -117,6 +147,13 @@ struct ResultGridView: NSViewRepresentable {
             let cell = (tableView.makeView(withIdentifier: Self.cellID, owner: nil) as? NSTableCellView) ?? Self.makeCell()
             let field = cell.textField!
             let kind = col < source.columns.count ? source.columns[col].kind : .other
+            let staged = source.isStaged(row: row, column: col)
+            cell.wantsLayer = true
+            // Resolve the dynamic colour for this table's appearance (light/dark).
+            var background: CGColor?
+            if staged { tableView.effectiveAppearance.performAsCurrentDrawingAppearance { background = DataColors.staged.cgColor } }
+            cell.layer?.backgroundColor = background
+            cell.toolTip = staged ? "Changed, not saved yet" : nil
             if let r = source.row(at: row), col < r.cells.count {
                 let value = r.cells[col]
                 field.stringValue = value.cellText
@@ -150,11 +187,23 @@ struct ResultGridView: NSViewRepresentable {
         }
 
         @objc func clicked(_ sender: NSTableView) {
+            guard let (row, index) = cell(at: sender) else { return }
+            parent.onSelectCell(row, index)
+        }
+
+        @objc func doubleClicked(_ sender: NSTableView) {
+            guard let (row, index) = cell(at: sender) else { return }
+            parent.onSelectCell(row, index)
+            parent.onActivateCell(row, index)
+        }
+
+        /// The clicked cell as (row, source column index), header clicks excluded.
+        private func cell(at sender: NSTableView) -> (Int, Int)? {
             let row = sender.clickedRow, col = sender.clickedColumn
-            guard row >= 0, col >= 0, let source else { return }
+            guard row >= 0, col >= 0, let source else { return nil }
             let index = Int(sender.tableColumns[col].identifier.rawValue) ?? col
-            guard index < source.columns.count, let r = source.row(at: row), index < r.cells.count else { return }
-            parent.onSelectCell(source.columns[index], r.cells[index], row)
+            guard index < source.columns.count, source.row(at: row) != nil else { return nil }
+            return (row, index)
         }
 
         /// Selected rows as tab-separated text with a header line.

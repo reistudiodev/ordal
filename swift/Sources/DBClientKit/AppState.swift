@@ -112,6 +112,16 @@ public final class AppState {
         await workspace.close()
     }
 
+    /// Reconnects an open workspace, or opens the connection if it isn't.
+    public func reconnect(_ id: String) async {
+        if let ws = workspaces.first(where: { $0.id == id }) {
+            activeWorkspaceID = id
+            await ws.reconnect()
+        } else {
+            await connect(id)
+        }
+    }
+
     public func dismissConnectError() {
         connectError = nil
     }

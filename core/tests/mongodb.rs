@@ -3,7 +3,7 @@
 mod common;
 
 use common::{exec, fixture, run};
-use dbclient_core::{NodeKind, StatementKind, Value};
+use dbclient_core::{CellEdit, NodeKind, PageCursor, SortSpec, StatementKind, Value};
 
 #[tokio::test]
 async fn mongodb_suite() {
@@ -44,9 +44,46 @@ async fn mongodb_suite() {
     let path = vec![db.clone(), "dbclient_it".to_string()];
     let idx = s.list_children(path.clone()).await.unwrap();
     assert!(idx.iter().any(|n| n.name == "_id_"));
-    let w = s.fetch_window(path.clone(), 100, 5).await.unwrap();
-    assert_eq!(w.rows.len(), 5);
-    assert!(s.row_count(path).await.unwrap().count >= 20_000);
+    // Keyset pages on _id, both directions, cover every document once.
+    let fwd = common::walk_forward(s, &path, 1000, None).await;
+    assert_eq!(fwd.len(), 20_000);
+    assert_eq!(common::walk_backward(s, &path, 1000, None).await, fwd);
+    let page = s.fetch_page(path.clone(), PageCursor::First, 5, None).await.unwrap();
+    assert_eq!(page.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["_id", "name", "even"]);
+    assert_eq!(page.rows[0].cells, vec![Value::Int { v: 0 }, Value::Text { v: "n0".into() }, Value::Bool { v: true }]);
+    assert_eq!(s.row_count(path.clone(), true).await.unwrap().count, 20_000);
+
+    // Sorted by a field pages with skip.
+    let sort = Some(SortSpec { column: "name".into(), descending: true });
+    let sorted = s.fetch_page(path.clone(), PageCursor::First, 3, sort).await.unwrap();
+    assert!(sorted.first_key.is_none());
+    assert_eq!(sorted.rows[0].cells[1], Value::Text { v: "n9999".into() });
+
+    // Edits keep the field's type: `even` stays a bool, a number stays a number.
+    let meta = s.table_meta(path.clone()).await.unwrap();
+    assert_eq!(meta.key_columns, vec!["_id".to_string()]);
+    let key = page.row_keys[0].clone();
+    let edits = vec![
+        CellEdit { key: key.clone(), column: "even".into(), value: Value::Text { v: "false".into() } },
+        CellEdit { key: key.clone(), column: "name".into(), value: Value::Text { v: "renamed".into() } },
+    ];
+    assert!(s.preview_edits(path.clone(), edits.clone()).await.unwrap()[0].contains("$set"));
+    assert_eq!(s.apply_edits(path.clone(), edits).await.unwrap(), 2);
+    let page = s.fetch_page(path.clone(), PageCursor::First, 1, None).await.unwrap();
+    assert_eq!(page.rows[0].cells[1..], [Value::Text { v: "renamed".into() }, Value::Bool { v: false }]);
+    let wrong = vec![CellEdit { key, column: "even".into(), value: Value::Text { v: "maybe".into() } }];
+    assert!(s.apply_edits(path.clone(), wrong).await.is_err());
+
+    // Inferred relations: orders.userId holds ids from users.
+    let _ = run(s, r#"{"drop": "users"}"#, 10).await;
+    let _ = run(s, r#"{"drop": "orders"}"#, 10).await;
+    exec(s, r#"{"insert": "users", "documents": [{"_id": {"$oid": "65f000000000000000000001"}, "name": "ann"}]}"#).await;
+    exec(s, r#"{"insert": "orders", "documents": [{"total": 5, "userId": {"$oid": "65f000000000000000000001"}}]}"#).await;
+    let graph = s.schema_graph(vec![db.clone()]).await.unwrap();
+    let rel = graph.relations.iter().find(|r| r.from_table == "orders").expect("orders → users");
+    assert_eq!((rel.to_table.as_str(), rel.from_columns[0].as_str(), rel.inferred), ("users", "userId", true));
+    exec(s, r#"{"drop": "users"}"#).await;
+    exec(s, r#"{"drop": "orders"}"#).await;
 
     assert_eq!(s.classify(r#"{"dropDatabase": 1}"#.into()), StatementKind::Destructive);
     exec(s, r#"{"drop": "dbclient_it"}"#).await;

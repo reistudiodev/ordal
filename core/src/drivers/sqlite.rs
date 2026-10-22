@@ -1,7 +1,9 @@
 //! SQLite driver (sqlx). The connection's `host` is the database file path.
 //! Browse tree: databases (main + attached) › Tables | Views › columns.
 
+use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -9,15 +11,30 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Executor, Row as _, SqlitePool, TypeInfo, ValueRef};
 use tokio_util::sync::CancellationToken;
 
+use super::sql_paging::{page_sql, split_hidden, update_statements, Dialect, KeyCol, SortCol};
 use super::sqlx_common::{self, quote_ident, StreamEnd};
-use super::{table_path, BrowseNode, Driver, NodeKind, ServerInfo, Sink, FOLDER_TABLES, FOLDER_VIEWS};
+use super::{table_path, BrowseNode, Driver, NodeKind, ServerInfo, Sink, EXACT_COUNT_BELOW, FOLDER_TABLES, FOLDER_VIEWS};
 use crate::config::ConnectionConfig;
 use crate::error::{CoreError, Result};
 use crate::sql::{classify_sql, StatementKind};
-use crate::value::{Row, RowCount, Value, ValueKind, Window};
+use crate::table::{
+    assemble, CellEdit, ColumnMeta, GraphColumn, GraphTable, PageCursor, PagingMode, Relation, SchemaGraph, SortSpec, TableMeta,
+    TablePage,
+};
+use crate::value::{Row, RowCount, Value, ValueKind};
 
 pub(crate) struct SqliteDriver {
     pool: SqlitePool,
+    read_only: bool,
+    tables: tokio::sync::Mutex<HashMap<Vec<String>, Arc<LiteTable>>>,
+}
+
+struct LiteTable {
+    meta: TableMeta,
+    relation: String,
+    is_view: bool,
+    /// The table has no declared primary key and pages/edits by rowid.
+    by_rowid: bool,
 }
 
 impl SqliteDriver {
@@ -37,17 +54,94 @@ impl SqliteDriver {
         } else {
             pool_opts.max_connections(4)
         };
-        Ok(Self { pool: pool_opts.connect_with(opts).await? })
+        Ok(Self { pool: pool_opts.connect_with(opts).await?, read_only: config.read_only, tables: Default::default() })
     }
 
-    async fn primary_key(&self, db: &str, table: &str) -> Result<Vec<String>> {
-        let rows: Vec<(String,)> =
-            sqlx::query_as("SELECT name FROM pragma_table_info(?1, ?2) WHERE pk > 0 ORDER BY pk")
-                .bind(table)
-                .bind(db)
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(rows.into_iter().map(|(n,)| n).collect())
+    async fn load_table(&self, path: &[String]) -> Result<Arc<LiteTable>> {
+        let (db, _, table) = table_path(path, false)?;
+        let sql = format!("SELECT type FROM {}.sqlite_master WHERE name = ?1", quote_ident(db, '"'));
+        let kind: String = sqlx::query_scalar(&sql)
+            .bind(table)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| CoreError::not_found(format!("table `{table}`")))?;
+        let is_view = kind == "view";
+        let cols: Vec<(String, String, bool, Option<String>, i64, i64)> = sqlx::query_as(
+            "SELECT name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1, ?2) ORDER BY cid",
+        )
+        .bind(table)
+        .bind(db)
+        .fetch_all(&self.pool)
+        .await?;
+        let indexed: Vec<String> = sqlx::query_scalar(
+            "SELECT ii.name FROM pragma_index_list(?1, ?2) il, pragma_index_info(il.name, ?2) ii WHERE ii.seqno = 0",
+        )
+        .bind(table)
+        .bind(db)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut pk: Vec<(i64, String)> = cols.iter().filter(|c| c.4 > 0).map(|c| (c.4, c.0.clone())).collect();
+        pk.sort();
+        let mut key_columns: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
+        let by_rowid = key_columns.is_empty() && !is_view;
+        if by_rowid {
+            key_columns.push("rowid".into());
+        }
+        let read_only_reason = if self.read_only {
+            Some("This connection is read-only.".to_string())
+        } else if is_view {
+            Some("Views can't be edited here.".to_string())
+        } else {
+            None
+        };
+        let editable = read_only_reason.is_none();
+        let columns = cols
+            .into_iter()
+            .map(|(name, ty, not_null, default, pk, hidden)| {
+                let is_key = pk > 0;
+                ColumnMeta {
+                    kind: kind_of(&ty),
+                    type_name: if ty.is_empty() { "any".into() } else { ty.to_lowercase() },
+                    nullable: !not_null && !is_key,
+                    has_default: default.is_some(),
+                    is_key,
+                    enum_values: Vec::new(),
+                    // hidden 2/3 = generated columns.
+                    editable: editable && !is_key && hidden == 0,
+                    indexed: is_key || indexed.contains(&name),
+                    name,
+                }
+            })
+            .collect();
+        let paging = if key_columns.is_empty() { PagingMode::Offset } else { PagingMode::Keyset };
+        let t = Arc::new(LiteTable {
+            meta: TableMeta { columns, paging, key_columns, editable, read_only_reason },
+            relation: format!("{}.{}", quote_ident(db, '"'), quote_ident(table, '"')),
+            is_view,
+            by_rowid,
+        });
+        self.tables.lock().await.insert(path.to_vec(), t.clone());
+        Ok(t)
+    }
+
+    async fn table(&self, path: &[String]) -> Result<Arc<LiteTable>> {
+        if let Some(t) = self.tables.lock().await.get(path) {
+            return Ok(t.clone());
+        }
+        self.load_table(path).await
+    }
+
+    fn statements(t: &LiteTable, edits: &[CellEdit]) -> Result<Vec<String>> {
+        if let Some(reason) = &t.meta.read_only_reason {
+            return Err(CoreError::ReadOnly { message: reason.clone() });
+        }
+        let types = |c: &str| {
+            if t.by_rowid && c == "rowid" {
+                return Some("integer".to_string());
+            }
+            t.meta.columns.iter().find(|m| m.name == c).map(|m| m.type_name.clone())
+        };
+        update_statements(Dialect::Sqlite, &t.relation, &t.meta.key_columns, &types, edits)
     }
 }
 
@@ -216,32 +310,145 @@ impl Driver for SqliteDriver {
         }
     }
 
-    async fn fetch_window(&self, path: &[String], offset: u64, limit: u32) -> Result<Window> {
-        let (db, _, table) = table_path(path, false)?;
-        let relation = format!("{}.{}", quote_ident(db, '"'), quote_ident(table, '"'));
-        let pk = self.primary_key(db, table).await?;
-        let order = if !pk.is_empty() {
-            let cols: Vec<String> = pk.iter().map(|c| quote_ident(c, '"')).collect();
-            format!(" ORDER BY {}", cols.join(", "))
-        } else if path[1] == FOLDER_TABLES {
-            " ORDER BY rowid".to_string()
-        } else {
-            String::new()
-        };
-        let sql = format!("SELECT * FROM {relation}{order} LIMIT {limit} OFFSET {offset}");
-        let mut window = sqlx_common::collect(&self.pool, &sql, kind_of, decode).await?;
-        if window.columns.is_empty() {
-            let probe = format!("SELECT * FROM {relation} LIMIT 0");
-            window.columns = sqlx_common::describe(&self.pool, &probe, kind_of).await.unwrap_or_default();
-        }
-        Ok(window)
+    async fn table_meta(&self, path: &[String]) -> Result<TableMeta> {
+        Ok(self.load_table(path).await?.meta.clone())
     }
 
-    async fn row_count(&self, path: &[String]) -> Result<RowCount> {
-        let (db, _, table) = table_path(path, false)?;
-        let sql = format!("SELECT count(*) FROM {}.{}", quote_ident(db, '"'), quote_ident(table, '"'));
-        let count: i64 = sqlx::query_scalar(&sql).fetch_one(&self.pool).await?;
-        Ok(RowCount { count: count as u64, exact: true })
+    async fn fetch_page(&self, path: &[String], cursor: &PageCursor, size: u32, sort: Option<&SortSpec>) -> Result<TablePage> {
+        let t = self.table(path).await?;
+        let key_col = |name: &str| KeyCol {
+            expr: if t.by_rowid && name == "rowid" { "rowid".into() } else { quote_ident(name, '"') },
+            cast: None,
+        };
+        let keys: Vec<KeyCol> = t.meta.key_columns.iter().map(|k| key_col(k)).collect();
+        let sort_col = match sort {
+            Some(s) if t.meta.columns.iter().any(|c| c.name == s.column) => Some((key_col(&s.column), s.descending, t.meta.columns.iter().find(|c| c.name == s.column).is_none_or(|c| c.nullable))),
+            Some(s) => return Err(CoreError::not_found(format!("column `{}`", s.column))),
+            None => None,
+        };
+        let sort = sort_col.as_ref().map(|(col, descending, nullable)| SortCol { col, descending: *descending, nullable: *nullable });
+        let (sql, hidden) = page_sql(Dialect::Sqlite, &t.relation, &keys, sort, cursor, size)?;
+        let mut window = sqlx_common::collect(&self.pool, &sql, kind_of, decode).await?;
+        if window.columns.is_empty() {
+            let probe = format!("SELECT * FROM {} LIMIT 0", t.relation);
+            let cols = sqlx_common::describe(&self.pool, &probe, kind_of).await.unwrap_or_default();
+            window.columns = std::iter::repeat_n(cols.first().cloned(), hidden).flatten().chain(cols).collect();
+        }
+        let fetched = split_hidden(window, hidden, hidden > keys.len(), t.meta.editable);
+        Ok(assemble(fetched, cursor, size as usize, !keys.is_empty()))
+    }
+
+    async fn row_count(&self, path: &[String], exact: bool) -> Result<RowCount> {
+        let t = self.table(path).await?;
+        if !exact && !t.is_view {
+            // max(rowid) is one index lookup; close enough for a scrollbar.
+            let has_rowid: Option<i64> = sqlx::query_scalar(&format!("SELECT max(rowid) FROM {}", t.relation))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(None);
+            if let Some(n) = has_rowid.filter(|&n| n >= EXACT_COUNT_BELOW) {
+                return Ok(RowCount { count: n as u64, exact: false });
+            }
+        }
+        let mut conn = self.pool.acquire().await?;
+        {
+            // Bounded: interrupt an exact count after a minute.
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            conn.lock_handle().await?.set_progress_handler(100_000, move || std::time::Instant::now() < deadline);
+        }
+        let count: Result<i64> = sqlx::query_scalar(&format!("SELECT count(*) FROM {}", t.relation))
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::Database(_) => CoreError::Timeout { message: "counting took longer than a minute".into() },
+                other => other.into(),
+            });
+        if let Ok(mut h) = conn.lock_handle().await {
+            h.remove_progress_handler();
+        }
+        Ok(RowCount { count: count? as u64, exact: true })
+    }
+
+    async fn preview_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<Vec<String>> {
+        Self::statements(&*self.table(path).await?, edits)
+    }
+
+    async fn apply_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<u64> {
+        let t = self.table(path).await?;
+        let statements = Self::statements(&t, edits)?;
+        let mut tx = self.pool.begin().await?;
+        for (i, sql) in statements.iter().enumerate() {
+            if tx.execute(sql.as_str()).await?.rows_affected() != 1 {
+                return Err(CoreError::query(format!(
+                    "change {} matched no row (it was changed or deleted elsewhere); nothing was saved",
+                    i + 1
+                )));
+            }
+        }
+        tx.commit().await?;
+        Ok(statements.len() as u64)
+    }
+
+    async fn schema_graph(&self, path: &[String]) -> Result<SchemaGraph> {
+        let db = path.first().map(String::as_str).unwrap_or("main");
+        let names: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT name FROM {}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            quote_ident(db, '"')
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut tables = Vec::new();
+        let mut relations = Vec::new();
+        for name in &names {
+            let cols: Vec<(String, String, bool, i64)> =
+                sqlx::query_as("SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1, ?2) ORDER BY cid")
+                    .bind(name)
+                    .bind(db)
+                    .fetch_all(&self.pool)
+                    .await?;
+            let fks: Vec<(i64, String, String, Option<String>)> =
+                sqlx::query_as("SELECT id, \"table\", \"from\", \"to\" FROM pragma_foreign_key_list(?1, ?2) ORDER BY id, seq")
+                    .bind(name)
+                    .bind(db)
+                    .fetch_all(&self.pool)
+                    .await?;
+            for (id, target, from, to) in fks {
+                match relations.last_mut() {
+                    Some(Relation { name: n, from_table, from_columns, to_columns, .. })
+                        if *n == format!("{name}_fk{id}") && from_table == name =>
+                    {
+                        from_columns.push(from);
+                        to_columns.push(to.unwrap_or_default());
+                    }
+                    _ => relations.push(Relation {
+                        name: format!("{name}_fk{id}"),
+                        from_table: name.clone(),
+                        from_columns: vec![from],
+                        to_table: target,
+                        to_columns: vec![to.unwrap_or_default()],
+                        inferred: false,
+                    }),
+                }
+            }
+            tables.push(GraphTable {
+                name: name.clone(),
+                path: vec![db.into(), FOLDER_TABLES.into(), name.clone()],
+                columns: cols
+                    .into_iter()
+                    .map(|(n, ty, not_null, pk)| GraphColumn { name: n, type_name: ty.to_lowercase(), is_key: pk > 0, nullable: !not_null })
+                    .collect(),
+                estimated_rows: None,
+            });
+        }
+        // `REFERENCES parent` without columns points at the parent's primary key.
+        for rel in &mut relations {
+            if rel.to_columns.iter().any(String::is_empty) {
+                if let Some(parent) = tables.iter().find(|t: &&GraphTable| t.name == rel.to_table) {
+                    rel.to_columns = parent.columns.iter().filter(|c| c.is_key).map(|c| c.name.clone()).collect();
+                }
+            }
+        }
+        Ok(SchemaGraph { tables, relations })
     }
 
     fn classify(&self, query: &str) -> StatementKind {

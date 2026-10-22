@@ -10,6 +10,56 @@
       "preLaunchTask": "Build app"
     },
     {
+      // Keeps connections and history in .dev/home and passwords in memory,
+      // so your real settings and keychain are never touched.
+      "name": "Debug macOS app (dev data)",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/macos",
+      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
+      "env": { "DBCLIENT_HOME": "${workspaceFolder}/.dev/home" },
+      "preLaunchTask": "Build app"
+    },
+    {
+      // Drives the app through its main screens against the first saved local
+      // Postgres connection in .dev/home, writes PNGs + report.txt, then quits.
+      "name": "macOS app: UI snapshots",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/macos",
+      "program": "${workspaceFolder}/apps/macos/.build/debug/DBClientMac",
+      "env": {
+        "DBCLIENT_HOME": "${workspaceFolder}/.dev/home",
+        "DBCLIENT_SNAPSHOTS": "${workspaceFolder}/.dev/snapshots"
+      },
+      "preLaunchTask": "Build app"
+    },
+    {
+      "name": "Debug Rust core unit tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "-p", "dbclient-core"],
+        "filter": { "name": "dbclient_core", "kind": "lib" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      // Set DBCLIENT_TEST_<ENGINE>_URL in "env" to run the server suites
+      // against your own databases (see README → Testing).
+      "name": "Debug Rust integration test (pick one)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["test", "--no-run", "-p", "dbclient-core", "--test", "${input:integrationTest}"],
+        "filter": { "name": "${input:integrationTest}", "kind": "test" }
+      },
+      "args": ["--nocapture"],
+      "cwd": "${workspaceFolder}",
+      "env": {}
+    },
+    {
       "name": "Debug Linux app",
       "type": "swift",
       "request": "launch",
@@ -24,6 +74,15 @@
       "cwd": "${workspaceFolder}/apps/windows",
       "program": "${workspaceFolder}/apps/windows/.build/debug/DBClientWindows.exe",
       "preLaunchTask": "Build app"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "integrationTest",
+      "type": "pickString",
+      "description": "Integration test suite",
+      "options": ["sqlite", "postgres", "mysql", "mongodb", "redis"],
+      "default": "sqlite"
     }
   ]
 }

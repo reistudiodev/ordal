@@ -28,16 +28,29 @@ enum DevSnapshots {
         }
         NSApp.appearance = NSAppearance(named: .aqua)
 
+        // The connection sheet, once per engine (no servers needed).
+        for kind in DatabaseKind.all {
+            app.newConnection()
+            app.form?.kind = kind
+            await settle()
+            captureSheet("connect-\(kind)", in: dir)
+            app.form = nil
+            await settle(0.3)
+        }
+        for topology in [ConnectionFormModel.MongoTopology.replicaSet, .srv] {
+            app.newConnection(url: topology == .srv
+                ? "mongodb+srv://ann@cluster0.abcde.mongodb.net/shop"
+                : "mongodb://ann:pw@db1:27017,db2:27017/shop?replicaSet=rs0&authSource=admin")
+            await settle()
+            captureSheet("connect-mongo-\(topology == .srv ? "srv" : "replicaset")", in: dir)
+            app.form = nil
+            await settle(0.3)
+        }
+
         guard let pg = app.connections.first(where: { $0.kind == .postgres && $0.environment == .local }) else {
             note("no local Postgres connection saved; stopping")
             return finish(report, dir)
         }
-
-        // Connect sheet, filled from a URL.
-        app.newConnection(url: "postgres://ann:secret@db.example.com:5432/shop?sslmode=require")
-        await settle()
-        captureSheet("connect-sheet", in: dir)
-        app.form = nil
 
         // Connect, browse, open the 1M-row table.
         let t0 = Date()
@@ -57,22 +70,67 @@ enum DevSnapshots {
         if let table = ws.browser.node(at: [pg.database, "public", "Tables", "events_1m"]) {
             let t1 = Date()
             ws.openTable(table)
-            while ws.activeTable?.pager.columns.isEmpty ?? true { await settle(0.05) }
-            note("open events_1m, first page: \(ms(since: t1)) ms, rows ≈ \(ws.activeTable?.pager.rowCount ?? 0)")
-            app.showInspector = true
-            if let pager = ws.activeTable?.pager, let row = pager.row(at: 3) {
-                ws.inspected = .init(column: pager.columns[5], value: row.cells[5], row: 3)
-            }
+            while ws.activeTable?.pager.page == nil { await settle(0.05) }
+            guard let tab = ws.activeTable else { return finish(report, dir) }
+            let pager = tab.pager
+            note("open events_1m, first page: \(ms(since: t1)) ms, count \(pager.count.map { "\($0.exact ? "" : "~")\($0.count)" } ?? "?")")
             await settle()
             capture("table-data", in: dir)
-            await measureScrolling(note: note)
-            await settle(0.5)
-            capture("table-scrolled", in: dir)
-            ws.activeTable?.segment = .ddl
+
+            // Last page of a 1M-row table (keyset), then back one page.
+            var t = Date()
+            await pager.last()
+            note("last page: \(ms(since: t)) ms, rows \(pager.rangeText), page \(pager.pageNumber)")
+            t = Date()
+            await pager.prev()
+            note("previous from last: \(ms(since: t)) ms, rows \(pager.rangeText)")
+
+            // Header sort on an indexed and an unindexed column.
+            t = Date()
+            await pager.toggleSort(column: "id")
+            await pager.toggleSort(column: "id")
+            note("sort id desc (indexed): \(ms(since: t)) ms, first id \(pager.row(at: 0)?.cells.first?.cellText ?? "?")")
+            t = Date()
+            await pager.toggleSort(column: "amount")
+            note("sort amount asc (no index): \(ms(since: t)) ms, slow warning: \(pager.sortIsSlow)")
+            await settle()
+            capture("table-sorted", in: dir)
+            await pager.toggleSort(column: "amount")
+            await pager.toggleSort(column: "amount")
+
+            // Stage two edits and open the inspector editor and review sheet.
+            app.showInspector = true
+            if let row = pager.row(at: 1) {
+                ws.inspected = .init(column: pager.columns[2], value: row.cells[2], row: 1, columnIndex: 2, tableTab: tab.id)
+            }
+            pager.stage(row: 1, column: 2, value: .text(v: "renamed"))
+            pager.stage(row: 3, column: 4, value: .bool(v: false))
+            await settle()
+            capture("table-staged", in: dir)
+            app.showInspector = false
+            await settle(0.3)
+
+            tab.segment = .ddl
             await settle()
             capture("table-ddl", in: dir)
+            tab.segment = .query
+            await tab.query.run()
+            await settle()
+            capture("table-query", in: dir)
+            tab.segment = .data
+            pager.discardEdits()
         } else {
             note("events_1m not found; load scripts/seed-1m.sql")
+        }
+
+        // Relations of the public schema.
+        ws.openSchema(path: [pg.database, "public"])
+        if case .schema(let schema)? = ws.selectedTab {
+            while schema.graph == nil && schema.error == nil { await settle(0.05) }
+            note("relations: \(schema.graph?.tables.count ?? 0) tables, \(schema.graph?.relations.count ?? 0) relations \(schema.error ?? "")")
+            schema.selected = schema.graph?.relations.first?.fromTable
+            await settle()
+            capture("relations", in: dir)
         }
 
         // A query tab with results.

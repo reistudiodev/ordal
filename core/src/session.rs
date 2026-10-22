@@ -12,7 +12,8 @@ use crate::drivers::{BrowseNode, Driver, KeyInfo, Msg, ServerInfo, Sink, CHANNEL
 use crate::error::{CoreError, Result};
 use crate::runtime::{self, run};
 use crate::sql::StatementKind;
-use crate::value::{ColumnInfo, Page, Row, RowCount, Window};
+use crate::table::{CellEdit, PageCursor, SchemaGraph, SortSpec, TableMeta, TablePage};
+use crate::value::{ColumnInfo, Page, Row, RowCount};
 
 /// One open connection (internally a small pool). Cheap to share between tabs.
 #[derive(uniffi::Object)]
@@ -84,15 +85,44 @@ impl Session {
         Ok(cursor)
     }
 
-    /// Rows `offset..offset+limit` of a table or view, for table tabs.
-    pub async fn fetch_window(&self, path: Vec<String>, offset: u64, limit: u32) -> Result<Window> {
+    /// Column types, keys and editability of a table or collection.
+    pub async fn table_meta(&self, path: Vec<String>) -> Result<TableMeta> {
         let d = self.driver.clone();
-        run(async move { d.fetch_window(&path, offset, limit).await }).await
+        run(async move { d.table_meta(&path).await }).await
     }
 
-    pub async fn row_count(&self, path: Vec<String>) -> Result<RowCount> {
+    /// One page of a table or collection, optionally sorted on the server.
+    pub async fn fetch_page(&self, path: Vec<String>, cursor: PageCursor, size: u32, sort: Option<SortSpec>) -> Result<TablePage> {
         let d = self.driver.clone();
-        run(async move { d.row_count(&path).await }).await
+        let size = size.clamp(1, 10_000);
+        run(async move { d.fetch_page(&path, &cursor, size, sort.as_ref()).await }).await
+    }
+
+    /// The engine's estimate, or an exact count (bounded by a timeout) when `exact`.
+    pub async fn row_count(&self, path: Vec<String>, exact: bool) -> Result<RowCount> {
+        let d = self.driver.clone();
+        run(async move { d.row_count(&path, exact).await }).await
+    }
+
+    /// The statements `apply_edits` would run, for the review sheet.
+    pub async fn preview_edits(&self, path: Vec<String>, edits: Vec<CellEdit>) -> Result<Vec<String>> {
+        let d = self.driver.clone();
+        run(async move { d.preview_edits(&path, &edits).await }).await
+    }
+
+    /// Applies staged cell edits in one transaction. Returns how many were applied.
+    pub async fn apply_edits(&self, path: Vec<String>, edits: Vec<CellEdit>) -> Result<u64> {
+        if self.config.read_only {
+            return Err(CoreError::ReadOnly { message: "this connection is read-only".into() });
+        }
+        let d = self.driver.clone();
+        run(async move { d.apply_edits(&path, &edits).await }).await
+    }
+
+    /// Tables and relations under a schema or database, for the diagram.
+    pub async fn schema_graph(&self, path: Vec<String>) -> Result<SchemaGraph> {
+        let d = self.driver.clone();
+        run(async move { d.schema_graph(&path).await }).await
     }
 
     /// Type, TTL and memory of the key at `path` (Redis).

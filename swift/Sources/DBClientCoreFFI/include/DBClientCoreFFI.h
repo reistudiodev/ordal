@@ -359,6 +359,11 @@ uint64_t uniffi_dbclient_core_fn_clone_session(uint64_t handle, RustCallStatus *
 void uniffi_dbclient_core_fn_free_session(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_APPLY_EDITS
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_APPLY_EDITS
+uint64_t uniffi_dbclient_core_fn_method_session_apply_edits(uint64_t ptr, RustBuffer path, RustBuffer edits
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_CLASSIFY
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_CLASSIFY
 RustBuffer uniffi_dbclient_core_fn_method_session_classify(uint64_t ptr, RustBuffer query, RustCallStatus *_Nonnull out_status
@@ -374,9 +379,9 @@ uint64_t uniffi_dbclient_core_fn_method_session_close(uint64_t ptr
 RustBuffer uniffi_dbclient_core_fn_method_session_config(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_FETCH_WINDOW
-#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_FETCH_WINDOW
-uint64_t uniffi_dbclient_core_fn_method_session_fetch_window(uint64_t ptr, RustBuffer path, uint64_t offset, uint32_t limit
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_FETCH_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_FETCH_PAGE
+uint64_t uniffi_dbclient_core_fn_method_session_fetch_page(uint64_t ptr, RustBuffer path, RustBuffer cursor, uint32_t size, RustBuffer sort
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_KEY_INFO
@@ -394,6 +399,11 @@ uint64_t uniffi_dbclient_core_fn_method_session_list_children(uint64_t ptr, Rust
 uint64_t uniffi_dbclient_core_fn_method_session_ping(uint64_t ptr
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_PREVIEW_EDITS
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_PREVIEW_EDITS
+uint64_t uniffi_dbclient_core_fn_method_session_preview_edits(uint64_t ptr, RustBuffer path, RustBuffer edits
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_QUERY
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_QUERY
 uint64_t uniffi_dbclient_core_fn_method_session_query(uint64_t ptr, RustBuffer query, RustBuffer database, RustCallStatus *_Nonnull out_status
@@ -406,12 +416,22 @@ int8_t uniffi_dbclient_core_fn_method_session_read_only(uint64_t ptr, RustCallSt
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_ROW_COUNT
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_ROW_COUNT
-uint64_t uniffi_dbclient_core_fn_method_session_row_count(uint64_t ptr, RustBuffer path
+uint64_t uniffi_dbclient_core_fn_method_session_row_count(uint64_t ptr, RustBuffer path, int8_t exact
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_SCHEMA_GRAPH
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_SCHEMA_GRAPH
+uint64_t uniffi_dbclient_core_fn_method_session_schema_graph(uint64_t ptr, RustBuffer path
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_SERVER_INFO
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_SERVER_INFO
 uint64_t uniffi_dbclient_core_fn_method_session_server_info(uint64_t ptr
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_TABLE_META
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_METHOD_SESSION_TABLE_META
+uint64_t uniffi_dbclient_core_fn_method_session_table_meta(uint64_t ptr, RustBuffer path
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_FN_FUNC_CORE_VERSION
@@ -798,6 +818,12 @@ uint16_t uniffi_dbclient_core_checksum_method_querycursor_rows_affected(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_APPLY_EDITS
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_APPLY_EDITS
+uint16_t uniffi_dbclient_core_checksum_method_session_apply_edits(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_CLASSIFY
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_CLASSIFY
 uint16_t uniffi_dbclient_core_checksum_method_session_classify(void
@@ -816,9 +842,9 @@ uint16_t uniffi_dbclient_core_checksum_method_session_config(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_FETCH_WINDOW
-#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_FETCH_WINDOW
-uint16_t uniffi_dbclient_core_checksum_method_session_fetch_window(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_FETCH_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_FETCH_PAGE
+uint16_t uniffi_dbclient_core_checksum_method_session_fetch_page(void
     
 );
 #endif
@@ -840,6 +866,12 @@ uint16_t uniffi_dbclient_core_checksum_method_session_ping(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_PREVIEW_EDITS
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_PREVIEW_EDITS
+uint16_t uniffi_dbclient_core_checksum_method_session_preview_edits(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_QUERY
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_QUERY
 uint16_t uniffi_dbclient_core_checksum_method_session_query(void
@@ -858,9 +890,21 @@ uint16_t uniffi_dbclient_core_checksum_method_session_row_count(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_SCHEMA_GRAPH
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_SCHEMA_GRAPH
+uint16_t uniffi_dbclient_core_checksum_method_session_schema_graph(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_SERVER_INFO
 #define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_SERVER_INFO
 uint16_t uniffi_dbclient_core_checksum_method_session_server_info(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_TABLE_META
+#define UNIFFI_FFIDEF_UNIFFI_DBCLIENT_CORE_CHECKSUM_METHOD_SESSION_TABLE_META
+uint16_t uniffi_dbclient_core_checksum_method_session_table_meta(void
     
 );
 #endif

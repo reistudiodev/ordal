@@ -1,12 +1,51 @@
 import DBClientKit
 import SwiftUI
 
+/// A dot for the connection state; its menu reconnects or disconnects.
+private struct ConnectionIndicator: View {
+    @Environment(AppState.self) private var app
+    let workspace: WorkspaceModel
+
+    var body: some View {
+        Menu {
+            Button("Reconnect") { Task { await workspace.reconnect() } }
+            Button("Disconnect") { Task { await app.disconnect(workspace.id) } }
+        } label: {
+            HStack(spacing: Space.hairline) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(label)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Connection: \(label). Click to reconnect or disconnect.")
+    }
+
+    private var label: String {
+        switch workspace.state {
+        case .connected: "Connected"
+        case .reconnecting: "Reconnecting"
+        case .lost: "Disconnected"
+        }
+    }
+
+    private var color: Color {
+        switch workspace.state {
+        case .connected: .green
+        case .reconnecting: .orange
+        case .lost: .red
+        }
+    }
+}
+
 /// Server version, latency, and the active tab's row count and timing.
 struct StatusBar: View {
     let workspace: WorkspaceModel
 
     var body: some View {
         HStack(spacing: Space.m) {
+            ConnectionIndicator(workspace: workspace)
             if workspace.config.environment.showsChrome {
                 Pill(text: workspace.config.environment.label.uppercased(), color: workspace.config.accent)
             }
@@ -40,7 +79,16 @@ struct StatusBar: View {
             }
         case .table(let t):
             let _ = t.pager.version
-            Text("\(t.pager.countIsExact ? "" : "~")\(t.pager.rowCount.formatted()) rows")
+            if let count = t.pager.count {
+                Text("\(count.exact ? "" : "~")\(count.count.formatted()) rows")
+            }
+            if !t.pager.staged.isEmpty {
+                Text("\(t.pager.staged.count) unsaved")
+            }
+        case .schema(let s):
+            if let g = s.graph {
+                Text("\(g.tables.count) tables · \(g.relations.count) relations")
+            }
         case nil:
             EmptyView()
         }

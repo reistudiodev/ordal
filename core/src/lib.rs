@@ -20,6 +20,7 @@ mod secrets;
 mod session;
 mod sql;
 mod store;
+mod table;
 mod value;
 
 pub use config::{parse_connection_url, ConnectionConfig, DatabaseKind, EnvironmentTag, ParsedConnection, TlsMode};
@@ -29,6 +30,9 @@ pub use history::HistoryEntry;
 pub use manager::ConnectionManager;
 pub use session::{QueryCursor, Session};
 pub use sql::{classify_statement, StatementKind};
+pub use table::{
+    CellEdit, ColumnMeta, GraphColumn, GraphTable, PageCursor, PagingMode, Relation, SchemaGraph, SortSpec, TableMeta, TablePage,
+};
 pub use value::{ColumnInfo, Page, Row, RowCount, Value, ValueKind, Window};
 
 /// Version of the core library, handy for an About screen.

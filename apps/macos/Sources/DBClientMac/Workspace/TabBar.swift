@@ -61,6 +61,7 @@ struct TabBar: View {
         switch tab {
         case .query: "text.cursor"
         case .table(let t): t.kind.symbol
+        case .schema: "point.3.connected.trianglepath.dotted"
         }
     }
 }

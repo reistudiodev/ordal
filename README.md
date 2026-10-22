@@ -102,6 +102,24 @@ load `scripts/seed-1m.sql`, then `cargo test --release --test postgres -- --igno
 | MongoDB | mongodb | JSON commands: `{"find": "users", "filter": {}}`, `{"aggregate": ...}`, any `runCommand` |
 | Redis | redis | redis-cli commands: `HGETALL user:1` |
 
+## Tables, editing and relations
+
+- **Paging.** Table tabs show one page at a time (50–1000 rows). With a primary key (or `_id`,
+  SQLite `rowid`, Postgres `ctid`) pages use keyset cursors, so the last page of a 100M-row table
+  costs the same as the first. Views and MySQL tables without a key fall back to OFFSET, and the
+  bar says so. Counts use the engine's estimate; **Count** runs an exact count with a 60 s limit.
+- **Sorting.** Click a header: ascending, descending, off. Sorting runs on the server with NULLs
+  last; sorting by a column no index starts with shows a warning because every page scans the table.
+  Query results sort in memory once fully loaded.
+- **Editing.** Select a cell in a table tab and edit it in the inspector (⌥⌘I). Input is checked
+  against the column type (integer ranges, decimal scale, dates, UUID, JSON, enums, length, NULL).
+  Changes are staged in yellow; **Review Changes** shows the exact SQL and applies everything in one
+  transaction (MongoDB: one by one, keeping each field's BSON type). Rows need a primary key.
+- **Relations.** Right-click a schema (Postgres) or database (MySQL, SQLite, MongoDB) → View Relations.
+  SQL uses declared foreign keys; MongoDB relations are inferred from ObjectId fields named after a
+  collection (`userId` → `users`) and drawn dashed.
+- **Queries as files.** ⌘S / ⇧⌘S save the editor to a `.sql` file where you choose; ⌘O opens one.
+
 ## Roadmap
 
 - [x] Phase 0: driver contract, one `Value` type, async API over UniFFI, Tokio runtime,

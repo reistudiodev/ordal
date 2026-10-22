@@ -10,7 +10,8 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{ConnectionConfig, DatabaseKind};
 use crate::error::{CoreError, Result};
 use crate::sql::StatementKind;
-use crate::value::{ColumnInfo, Row, RowCount, Window};
+use crate::table::{CellEdit, PageCursor, SchemaGraph, SortSpec, TableMeta, TablePage};
+use crate::value::{ColumnInfo, Row, RowCount};
 
 #[cfg(feature = "mongodb")]
 mod mongodb;
@@ -20,6 +21,8 @@ mod mysql;
 mod postgres;
 #[cfg(feature = "redis")]
 mod redis;
+#[cfg(any(feature = "postgres", feature = "mysql", feature = "sqlite"))]
+mod sql_paging;
 #[cfg(any(feature = "postgres", feature = "mysql", feature = "sqlite"))]
 mod sqlx_common;
 #[cfg(feature = "sqlite")]
@@ -119,9 +122,36 @@ pub(crate) trait Driver: Send + Sync {
         sink: &mut Sink,
         cancel: &CancellationToken,
     ) -> Result<()>;
-    /// Random access into a table/collection for table tabs.
-    async fn fetch_window(&self, path: &[String], offset: u64, limit: u32) -> Result<Window>;
-    async fn row_count(&self, path: &[String]) -> Result<RowCount>;
+    /// Column types, keys and whether rows can be edited.
+    async fn table_meta(&self, _path: &[String]) -> Result<TableMeta> {
+        Err(CoreError::unsupported("this engine has no tables"))
+    }
+    /// One page of a table or collection (see `table` for the paging rules).
+    async fn fetch_page(
+        &self,
+        _path: &[String],
+        _cursor: &PageCursor,
+        _size: u32,
+        _sort: Option<&SortSpec>,
+    ) -> Result<TablePage> {
+        Err(CoreError::unsupported("this engine has no tables"))
+    }
+    /// The engine's estimate, or an exact count (bounded by a timeout) when asked.
+    async fn row_count(&self, _path: &[String], _exact: bool) -> Result<RowCount> {
+        Err(CoreError::unsupported("this engine has no tables"))
+    }
+    /// The statements `apply_edits` would run, for the review sheet.
+    async fn preview_edits(&self, _path: &[String], _edits: &[CellEdit]) -> Result<Vec<String>> {
+        Err(CoreError::unsupported("editing is not available for this engine"))
+    }
+    /// Applies all edits in one transaction; any missing row aborts them all.
+    async fn apply_edits(&self, _path: &[String], _edits: &[CellEdit]) -> Result<u64> {
+        Err(CoreError::unsupported("editing is not available for this engine"))
+    }
+    /// Tables and their relations under `path` (a schema or database).
+    async fn schema_graph(&self, _path: &[String]) -> Result<SchemaGraph> {
+        Err(CoreError::unsupported("relations are only available for SQL databases and MongoDB"))
+    }
     /// Type, TTL and size of a key (key-value stores only).
     async fn key_info(&self, _path: &[String]) -> Result<KeyInfo> {
         Err(CoreError::unsupported("key details are only available for Redis"))

@@ -18,6 +18,7 @@ struct WorkspaceView: View {
             .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 520)
         } detail: {
             VStack(spacing: 0) {
+                ConnectionBanner(workspace: workspace)
                 TabBar(workspace: workspace)
                 Divider()
                 content
@@ -49,6 +50,8 @@ struct WorkspaceView: View {
             QueryTabView(tab: tab, workspace: workspace).id(tab.id)
         case .table(let tab):
             TableTabView(tab: tab, workspace: workspace).id(tab.id)
+        case .schema(let tab):
+            SchemaDiagramView(tab: tab, workspace: workspace).id(tab.id)
         case nil:
             ContentUnavailableView {
                 Label("No open tabs", systemImage: "rectangle.on.rectangle")
@@ -94,10 +97,14 @@ struct ConnectionRail: View {
                 .help("\(config.name) · \(config.address)")
                 .accessibilityLabel("\(config.name), \(config.environment.label)\(app.isOpen(config.id) ? ", open" : "")")
                 .contextMenu {
-                    Button("Edit…") { app.edit(config) }
                     if app.isOpen(config.id) {
+                        Button("Reconnect") { Task { await app.reconnect(config.id) } }
                         Button("Disconnect") { Task { await app.disconnect(config.id) } }
+                    } else {
+                        Button("Connect") { Task { await app.connect(config.id) } }
                     }
+                    Divider()
+                    Button("Edit…") { app.edit(config) }
                 }
             }
             Spacer()
@@ -112,6 +119,48 @@ struct ConnectionRail: View {
         }
         .padding(.vertical, Space.s)
         .frame(width: 48)
+    }
+}
+
+/// Shown when pings or queries find the connection gone.
+private struct ConnectionBanner: View {
+    let workspace: WorkspaceModel
+
+    var body: some View {
+        switch workspace.state {
+        case .connected:
+            EmptyView()
+        case .reconnecting:
+            HStack(spacing: Space.s) {
+                ProgressView().controlSize(.small)
+                Text("Reconnecting to \(workspace.config.name)…")
+                Spacer()
+            }
+            .bannerStyle(.secondary)
+        case .lost(let message):
+            HStack(spacing: Space.s) {
+                Image(systemName: "bolt.horizontal.circle.fill").foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Connection lost").font(.callout.weight(.semibold))
+                    Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Button("Reconnect") { Task { await workspace.reconnect() } }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+            .bannerStyle(.red)
+        }
+    }
+}
+
+private extension View {
+    func bannerStyle(_ tint: Color) -> some View {
+        self.controlSize(.small)
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.s)
+            .background(tint.opacity(0.1))
+            .overlay(alignment: .bottom) { Divider() }
     }
 }
 

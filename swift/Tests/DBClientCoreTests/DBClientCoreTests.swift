@@ -83,8 +83,11 @@ final class DBClientCoreTests: XCTestCase {
 
         let tables = try await session.listChildren(path: ["main", "Tables"])
         XCTAssertEqual(tables.map(\.name), ["t"])
-        let window = try await session.fetchWindow(path: ["main", "Tables", "t"], offset: 1, limit: 5)
-        XCTAssertEqual(window.rows.count, 2)
+        let page = try await session.fetchPage(path: ["main", "Tables", "t"], cursor: .first, size: 2, sort: nil)
+        XCTAssertEqual(page.rows.count, 2)
+        XCTAssertTrue(page.hasNext)
+        let next = try await session.fetchPage(path: ["main", "Tables", "t"], cursor: .after(key: page.lastKey!), size: 2, sort: nil)
+        XCTAssertEqual(next.rows.first?.cells.first, .int(v: 3))
         await session.close()
     }
 

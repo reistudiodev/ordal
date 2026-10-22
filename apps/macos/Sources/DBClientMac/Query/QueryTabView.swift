@@ -59,6 +59,12 @@ struct QueryTabView: View {
             if let db = tab.database {
                 Text(db).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
+            if let url = tab.fileURL {
+                Label(url.lastPathComponent + (tab.isDirty ? " •" : ""), systemImage: "doc.text")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(url.path)
+            }
             Spacer()
             if workspace.config.kind.isSQL {
                 Button("Format") { tab.format() }
@@ -127,9 +133,15 @@ private struct ResultsPane: View {
                 } else if pager.columns.isEmpty {
                     ProgressView("Running…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ResultGridView(source: pager, version: version) { column, value, row in
-                        workspace.inspected = .init(column: column, value: value, row: row)
-                    }
+                    ResultGridView(
+                        source: pager, version: version,
+                        onSelectCell: { row, col in
+                            if let r = pager.row(at: row) {
+                                workspace.inspected = .init(column: pager.columns[col], value: r.cells[col], row: row, columnIndex: col)
+                            }
+                        },
+                        onSortColumn: pager.canSort ? { pager.toggleSort(column: $0) } : nil
+                    )
                     if pager.isTruncated {
                         Text("Showing the first \(CursorPager.defaultCap.formatted()) rows. Add a LIMIT or filter to see the rest.")
                             .font(.caption)

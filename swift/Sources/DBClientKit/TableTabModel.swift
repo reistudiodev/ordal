@@ -1,13 +1,15 @@
 import Foundation
 import Observation
 
-/// A table, view or collection tab: data first, then structure and DDL.
+/// A table, view or collection tab: data first, then structure, DDL and a
+/// query editor scoped to this table.
 @MainActor @Observable
 public final class TableTabModel: Identifiable {
     public enum Segment: String, CaseIterable, Identifiable {
         case data = "Data"
         case structure = "Structure"
         case ddl = "DDL"
+        case query = "Query"
         public var id: String { rawValue }
     }
 
@@ -15,29 +17,40 @@ public final class TableTabModel: Identifiable {
     public let path: [String]
     public let kind: NodeKind
     public var segment: Segment = .data
-    public let pager: WindowPager
+    public let pager: TablePager
+    /// The Query segment's editor, prefilled for this table.
+    public let query: QueryTabModel
     public private(set) var structure: [BrowseNode] = []
     public private(set) var ddl = ""
     public private(set) var structureError: String?
 
-    private let session: Session
+    private var session: Session
 
-    init(path: [String], kind: NodeKind, session: Session) {
+    init(path: [String], kind: NodeKind, starter: String, database: String?, session: Session, manager: ConnectionManager) {
         self.path = path
         self.kind = kind
         self.session = session
-        self.pager = WindowPager(session: session, path: path)
+        self.pager = TablePager(session: session, path: path)
+        self.query = QueryTabModel(title: path.last ?? "query", text: starter, session: session, manager: manager)
+        query.database = database
+        query.loadHistory()
     }
 
     public var title: String { path.last ?? "table" }
 
     public var segments: [Segment] {
-        session.config().kind.isSQL ? Segment.allCases : [.data, .structure]
+        session.config().kind.isSQL ? Segment.allCases : [.data, .structure, .query]
     }
 
     public func start() async {
         await pager.start()
         await loadStructure()
+    }
+
+    func rebind(_ session: Session) {
+        self.session = session
+        pager.rebind(session)
+        query.session = session
     }
 
     public func loadStructure() async {
@@ -47,6 +60,10 @@ public final class TableTabModel: Identifiable {
             structureError = nil
         } catch {
             structureError = describe(error)
+        }
+        // MongoDB browse children are indexes; show the sampled fields instead.
+        if session.config().kind == .mongoDb, let meta = pager.meta {
+            structure = meta.columns.map { BrowseNode(name: $0.name, kind: .column, hasChildren: false, detail: $0.typeName) }
         }
     }
 

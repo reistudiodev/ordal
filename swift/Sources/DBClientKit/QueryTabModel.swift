@@ -34,15 +34,46 @@ public final class QueryTabModel: Identifiable {
     /// Set when a statement was blocked (read-only).
     public private(set) var notice: String?
 
-    let session: Session
+    /// The `.sql` file this tab was opened from or saved to.
+    public private(set) var fileURL: URL?
+    private var savedText: String
+
+    var session: Session
     let manager: ConnectionManager
+    /// Called when a query fails because the connection dropped.
+    var onConnectionLost: ((String) -> Void)?
     private var startedAt = Date()
 
     init(title: String, text: String = "", session: Session, manager: ConnectionManager) {
         self.title = title
         self.text = text
+        self.savedText = text
         self.session = session
         self.manager = manager
+    }
+
+    /// Unsaved changes since the last save or open (only for file-backed or edited tabs).
+    public var isDirty: Bool { text != savedText }
+
+    /// Writes the editor text to a `.sql` (or `.json` / `.redis`) file.
+    public func save(to url: URL) throws {
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        fileURL = url
+        savedText = text
+        title = url.deletingPathExtension().lastPathComponent
+    }
+
+    /// Saves to the file this tab already has; returns false when there is none.
+    @discardableResult
+    public func save() throws -> Bool {
+        guard let fileURL else { return false }
+        try save(to: fileURL)
+        return true
+    }
+
+    func loaded(from url: URL) {
+        fileURL = url
+        savedText = text
     }
 
     var config: ConnectionConfig { session.config() }
@@ -98,12 +129,14 @@ public final class QueryTabModel: Identifiable {
             await pager.start()
             if let error = pager.error {
                 status = error == CoreError.Cancelled.message ? .cancelled : .failed(error)
+                if pager.lostConnection { onConnectionLost?(error) }
             } else {
                 status = .finished
             }
             record(sql, succeeded: pager.error == nil, rows: pager.rowsAffected ?? UInt64(pager.rowCount), ms: pager.elapsedMs)
         } catch {
             status = .failed(describe(error))
+            if case .Connection? = error as? CoreError { onConnectionLost?(describe(error)) }
             record(sql, succeeded: false, rows: nil, ms: UInt64(Date().timeIntervalSince(startedAt) * 1000))
         }
     }

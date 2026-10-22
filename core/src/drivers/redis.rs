@@ -14,7 +14,7 @@ use super::{or_cancel, BrowseNode, Driver, KeyInfo, NodeKind, ServerInfo, Sink};
 use crate::config::{ConnectionConfig, TlsMode};
 use crate::error::{CoreError, Result};
 use crate::sql::StatementKind;
-use crate::value::{ColumnInfo, Row, RowCount, Value, ValueKind, Window};
+use crate::value::{ColumnInfo, Row, Value, ValueKind};
 
 /// Stop scanning a level after this many keys; the browser says so.
 const SCAN_CAP: usize = 10_000;
@@ -395,14 +395,6 @@ impl Driver for RedisDriver {
             }
         }
         Ok(())
-    }
-
-    async fn fetch_window(&self, _path: &[String], _offset: u64, _limit: u32) -> Result<Window> {
-        Err(CoreError::unsupported("Redis keys open in a key viewer, not a table"))
-    }
-
-    async fn row_count(&self, _path: &[String]) -> Result<RowCount> {
-        Err(CoreError::unsupported("Redis keys open in a key viewer, not a table"))
     }
 
     async fn key_info(&self, path: &[String]) -> Result<KeyInfo> {

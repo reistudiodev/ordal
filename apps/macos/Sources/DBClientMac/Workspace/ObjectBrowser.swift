@@ -117,6 +117,9 @@ private struct NodeLabel: View {
                     workspace.newQueryTab(text: starter, database: workspace.database(for: node.path))
                 }
             }
+            if let path = workspace.relationsPath(for: node) {
+                Button("View Relations") { workspace.openSchema(path: path) }
+            }
             Button("Copy Name") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(node.name, forType: .string)

@@ -44,7 +44,7 @@ struct AppCommands: Commands {
     let app: AppState
 
     private var workspace: WorkspaceModel? { app.activeWorkspace }
-    private var query: QueryTabModel? { workspace?.activeQuery }
+    private var query: QueryTabModel? { workspace?.activeEditor }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -53,11 +53,22 @@ struct AppCommands: Commands {
             Button("New Query Tab") { workspace?.newQueryTab() }
                 .keyboardShortcut("t")
                 .disabled(workspace == nil)
+            Button("Open SQL File…") { if let ws = workspace { QueryFiles.open(in: ws) } }
+                .keyboardShortcut("o")
+                .disabled(workspace == nil)
             Button("Close Tab") {
                 if let id = workspace?.selectedTabID { workspace?.closeTab(id) }
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
             .disabled(workspace?.selectedTabID == nil)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button("Save Query") { if let q = query { QueryFiles.save(q) } }
+                .keyboardShortcut("s")
+                .disabled(query == nil)
+            Button("Save Query As…") { if let q = query { QueryFiles.saveAs(q) } }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(query == nil)
         }
         CommandMenu("Query") {
             Button("Run") { if let q = query { Task { await q.run() } } }
@@ -86,6 +97,9 @@ struct AppCommands: Commands {
             Button("Switch Connection…") { app.showPalette = true }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             Button("Edit Connection…") { if let c = workspace?.config { app.edit(c) } }
+                .disabled(workspace == nil)
+            Button("Reconnect") { if let ws = workspace { Task { await ws.reconnect() } } }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(workspace == nil)
             Button("Disconnect") { if let id = workspace?.id { Task { await app.disconnect(id) } } }
                 .disabled(workspace == nil)

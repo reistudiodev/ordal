@@ -2,25 +2,42 @@
 //! Browse tree: databases › schemas › Tables | Views | Functions › columns.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgRow, PgSslMode};
-use sqlx::{Executor, PgPool, Row as _, ValueRef};
+use sqlx::{Executor, Row as _, ValueRef};
 use tokio_util::sync::CancellationToken;
 
+use super::sql_paging::{page_sql, split_hidden, update_statements, Dialect, KeyCol, SortCol};
 use super::sqlx_common::{self, quote_ident, Pools, StreamEnd, EXACT_COUNT_BELOW};
 use super::{approx_rows, table_path, BrowseNode, Driver, NodeKind, ServerInfo, Sink};
 use super::{FOLDER_FUNCTIONS, FOLDER_TABLES, FOLDER_VIEWS};
 use crate::config::{ConnectionConfig, TlsMode};
 use crate::error::{CoreError, Result};
 use crate::sql::{classify_sql, StatementKind};
-use crate::value::{decode_pg_hex, Row, RowCount, Value, ValueKind, Window};
+use crate::table::{
+    assemble, sql_string, CellEdit, ColumnMeta, GraphColumn, GraphTable, PageCursor, PagingMode, Relation, SchemaGraph, SortSpec,
+    TableMeta, TablePage,
+};
+use crate::value::{decode_pg_hex, Row, RowCount, Value, ValueKind};
 
 pub(crate) struct PgDriver {
     pools: Pools<sqlx::Postgres>,
-    /// Primary-key columns per (db, schema, table), for stable window ordering.
-    keys: tokio::sync::Mutex<HashMap<(String, String, String), Vec<String>>>,
+    read_only: bool,
+    /// Column types and keys per table path, loaded on first use.
+    tables: tokio::sync::Mutex<HashMap<Vec<String>, Arc<PgTable>>>,
+}
+
+/// What paging and editing need to know about one relation.
+struct PgTable {
+    meta: TableMeta,
+    relation: String,
+    relkind: String,
+    /// Cast for literals compared with or assigned to each column (no typmod,
+    /// so an over-long value errors instead of being silently cut).
+    casts: HashMap<String, String>,
 }
 
 impl PgDriver {
@@ -49,6 +66,8 @@ impl PgDriver {
                     .idle_timeout(Duration::from_secs(300))
                     .after_connect(move |conn, _| {
                         Box::pin(async move {
+                            // Page and edit literals rely on quotes being the only escape.
+                            conn.execute("SET standard_conforming_strings = on").await?;
                             if read_only {
                                 // Enforced by the server, not just by our classifier.
                                 conn.execute("SET default_transaction_read_only = on").await?;
@@ -61,15 +80,20 @@ impl PgDriver {
             })
         })
         .await?;
-        Ok(Self { pools, keys: Default::default() })
+        Ok(Self { pools, read_only, tables: Default::default() })
     }
 
-    async fn primary_key(&self, pool: &PgPool, db: &str, schema: &str, table: &str) -> Result<Vec<String>> {
-        let key = (db.to_string(), schema.to_string(), table.to_string());
-        if let Some(k) = self.keys.lock().await.get(&key) {
-            return Ok(k.clone());
-        }
-        let cols: Vec<String> = sqlx::query_scalar(
+    /// Loads (or reloads) a table's metadata.
+    async fn load_table(&self, path: &[String]) -> Result<Arc<PgTable>> {
+        let (db, schema, table) = table_path(path, true)?;
+        let schema = schema.unwrap_or("public");
+        let pool = self.pools.get(Some(db)).await?;
+        let relkind: String = sqlx::query_scalar("SELECT relkind::text FROM pg_class WHERE oid = format('%I.%I', $1, $2)::regclass")
+            .bind(schema)
+            .bind(table)
+            .fetch_one(&pool)
+            .await?;
+        let pk: Vec<String> = sqlx::query_scalar(
             "SELECT a.attname::text FROM pg_index i \
              JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
              WHERE i.indrelid = format('%I.%I', $1, $2)::regclass AND i.indisprimary \
@@ -77,10 +101,79 @@ impl PgDriver {
         )
         .bind(schema)
         .bind(table)
-        .fetch_all(pool)
+        .fetch_all(&pool)
         .await?;
-        self.keys.lock().await.insert(key, cols.clone());
-        Ok(cols)
+        type Col = (String, String, String, String, bool, bool, Vec<String>, bool, bool);
+        let cols: Vec<Col> = sqlx::query_as(
+            "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), format_type(a.atttypid, NULL), \
+               upper(t.typname)::text, NOT a.attnotnull, a.atthasdef, \
+               COALESCE((SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) FROM pg_enum e \
+                         WHERE e.enumtypid = a.atttypid), '{}'), \
+               (a.attgenerated <> '' OR a.attidentity = 'a'), \
+               EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = a.attrelid AND i.indkey[0] = a.attnum) \
+             FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid \
+             WHERE a.attrelid = format('%I.%I', $1, $2)::regclass AND a.attnum > 0 AND NOT a.attisdropped \
+             ORDER BY a.attnum",
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&pool)
+        .await?;
+
+        let is_table = matches!(relkind.as_str(), "r" | "p");
+        let read_only_reason = if self.read_only {
+            Some("This connection is read-only.".to_string())
+        } else if !is_table {
+            Some("Views and other non-table relations can't be edited here.".to_string())
+        } else if pk.is_empty() {
+            Some("This table has no primary key, so a row can't be identified safely.".to_string())
+        } else {
+            None
+        };
+        let editable = read_only_reason.is_none();
+        let mut casts = HashMap::new();
+        let columns = cols
+            .into_iter()
+            .map(|(name, full, base, typname, nullable, has_default, enum_values, generated, indexed)| {
+                casts.insert(name.clone(), base);
+                let is_key = pk.contains(&name);
+                ColumnMeta {
+                    kind: if enum_values.is_empty() { kind_of(&typname) } else { ValueKind::Text },
+                    editable: editable && !is_key && !generated,
+                    name,
+                    type_name: full,
+                    nullable,
+                    is_key,
+                    has_default,
+                    enum_values,
+                    indexed,
+                }
+            })
+            .collect();
+        let paging = if !pk.is_empty() || matches!(relkind.as_str(), "r" | "p" | "m") { PagingMode::Keyset } else { PagingMode::Offset };
+        let t = Arc::new(PgTable {
+            meta: TableMeta { columns, paging, key_columns: pk, editable, read_only_reason },
+            relation: format!("{}.{}", quote_ident(schema, '"'), quote_ident(table, '"')),
+            relkind,
+            casts,
+        });
+        self.tables.lock().await.insert(path.to_vec(), t.clone());
+        Ok(t)
+    }
+
+    async fn table(&self, path: &[String]) -> Result<Arc<PgTable>> {
+        if let Some(t) = self.tables.lock().await.get(path) {
+            return Ok(t.clone());
+        }
+        self.load_table(path).await
+    }
+
+    fn statements(t: &PgTable, edits: &[CellEdit]) -> Result<Vec<String>> {
+        if let Some(reason) = &t.meta.read_only_reason {
+            return Err(CoreError::ReadOnly { message: reason.clone() });
+        }
+        let types = |c: &str| t.casts.get(c).cloned();
+        update_statements(Dialect::Postgres, &t.relation, &t.meta.key_columns, &types, edits)
     }
 }
 
@@ -275,44 +368,148 @@ impl Driver for PgDriver {
         }
     }
 
-    async fn fetch_window(&self, path: &[String], offset: u64, limit: u32) -> Result<Window> {
-        let (db, schema, table) = table_path(path, true)?;
-        let schema = schema.unwrap_or("public");
-        let pool = self.pools.get(Some(db)).await?;
-        let relation = format!("{}.{}", quote_ident(schema, '"'), quote_ident(table, '"'));
-        let pk = self.primary_key(&pool, db, schema, table).await?;
-        let order = if !pk.is_empty() {
-            let cols: Vec<String> = pk.iter().map(|c| quote_ident(c, '"')).collect();
-            format!(" ORDER BY {}", cols.join(", "))
-        } else if path[2] == FOLDER_TABLES {
-            " ORDER BY ctid".to_string()
-        } else {
-            String::new()
-        };
-        let sql = format!("SELECT * FROM {relation}{order} LIMIT {limit} OFFSET {offset}");
-        let mut window = sqlx_common::collect(&pool, &sql, kind_of, decode).await?;
-        if window.columns.is_empty() {
-            let probe = format!("SELECT * FROM {relation} LIMIT 0");
-            window.columns = sqlx_common::describe(&pool, &probe, kind_of).await.unwrap_or_default();
-        }
-        Ok(window)
+    async fn table_meta(&self, path: &[String]) -> Result<TableMeta> {
+        Ok(self.load_table(path).await?.meta.clone())
     }
 
-    async fn row_count(&self, path: &[String]) -> Result<RowCount> {
-        let (db, schema, table) = table_path(path, true)?;
-        let schema = schema.unwrap_or("public");
-        let pool = self.pools.get(Some(db)).await?;
-        let estimate: i64 = sqlx::query_scalar("SELECT reltuples::int8 FROM pg_class WHERE oid = format('%I.%I', $1, $2)::regclass")
-            .bind(schema)
-            .bind(table)
+    async fn fetch_page(&self, path: &[String], cursor: &PageCursor, size: u32, sort: Option<&SortSpec>) -> Result<TablePage> {
+        let t = self.table(path).await?;
+        let pool = self.pools.get(Some(&path[0])).await?;
+        let key_col = |name: &str| KeyCol { expr: quote_ident(name, '"'), cast: t.casts.get(name).cloned() };
+        let keys: Vec<KeyCol> = if !t.meta.key_columns.is_empty() {
+            t.meta.key_columns.iter().map(|k| key_col(k)).collect()
+        } else if t.meta.paging == PagingMode::Keyset {
+            // No primary key: the physical row id still pages (TID range scans).
+            vec![KeyCol { expr: "ctid".into(), cast: Some("tid".into()) }]
+        } else {
+            Vec::new()
+        };
+        let sort_col = match sort {
+            Some(s) if t.casts.contains_key(&s.column) => Some((key_col(&s.column), s.descending, t.meta.columns.iter().find(|c| c.name == s.column).is_none_or(|c| c.nullable))),
+            Some(s) => return Err(CoreError::not_found(format!("column `{}`", s.column))),
+            None => None,
+        };
+        let sort = sort_col.as_ref().map(|(col, descending, nullable)| SortCol { col, descending: *descending, nullable: *nullable });
+        let (sql, hidden) = page_sql(Dialect::Postgres, &t.relation, &keys, sort, cursor, size)?;
+        let mut window = sqlx_common::collect(&pool, &sql, kind_of, decode).await?;
+        if window.columns.is_empty() {
+            let probe = format!("SELECT * FROM {} LIMIT 0", t.relation);
+            let cols = sqlx_common::describe(&pool, &probe, kind_of).await.unwrap_or_default();
+            window.columns = std::iter::repeat_n(cols.first().cloned(), hidden).flatten().chain(cols).collect();
+        }
+        let fetched = split_hidden(window, hidden, hidden > keys.len(), !t.meta.key_columns.is_empty());
+        Ok(assemble(fetched, cursor, size as usize, !keys.is_empty()))
+    }
+
+    async fn row_count(&self, path: &[String], exact: bool) -> Result<RowCount> {
+        let t = self.table(path).await?;
+        let pool = self.pools.get(Some(&path[0])).await?;
+        let estimate: i64 = sqlx::query_scalar(&format!("SELECT reltuples::int8 FROM pg_class WHERE oid = {}::regclass", sql_string(&t.relation)))
             .fetch_one(&pool)
             .await?;
-        if estimate >= EXACT_COUNT_BELOW {
+        if !exact && estimate >= EXACT_COUNT_BELOW && t.relkind != "v" {
             return Ok(RowCount { count: estimate as u64, exact: false });
         }
-        let sql = format!("SELECT count(*) FROM {}.{}", quote_ident(schema, '"'), quote_ident(table, '"'));
-        let count: i64 = sqlx::query_scalar(&sql).fetch_one(&pool).await?;
+        // Bounded: an exact count of a huge table must not run forever.
+        let mut tx = pool.begin().await?;
+        tx.execute("SET LOCAL statement_timeout = '60s'").await?;
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {}", t.relation)).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
         Ok(RowCount { count: count as u64, exact: true })
+    }
+
+    async fn preview_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<Vec<String>> {
+        Self::statements(&*self.table(path).await?, edits)
+    }
+
+    async fn apply_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<u64> {
+        let t = self.table(path).await?;
+        let statements = Self::statements(&t, edits)?;
+        let mut tx = self.pools.get(Some(&path[0])).await?.begin().await?;
+        for (i, sql) in statements.iter().enumerate() {
+            if tx.execute(sql.as_str()).await?.rows_affected() != 1 {
+                return Err(CoreError::query(format!(
+                    "change {} matched no row (it was changed or deleted elsewhere); nothing was saved",
+                    i + 1
+                )));
+            }
+        }
+        tx.commit().await?;
+        Ok(statements.len() as u64)
+    }
+
+    async fn schema_graph(&self, path: &[String]) -> Result<SchemaGraph> {
+        let (db, schema) = match path {
+            [db] => (db.as_str(), "public"),
+            [db, schema, ..] => (db.as_str(), schema.as_str()),
+            [] => return Err(CoreError::invalid("choose a database or schema")),
+        };
+        let pool = self.pools.get(Some(db)).await?;
+        let cols: Vec<(String, String, String, bool, bool, i64)> = sqlx::query_as(
+            "SELECT c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
+               COALESCE(a.attnum = ANY(pk.indkey), false), c.reltuples::int8 \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+             LEFT JOIN pg_index pk ON pk.indrelid = c.oid AND pk.indisprimary \
+             WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') ORDER BY c.relname, a.attnum",
+        )
+        .bind(schema)
+        .fetch_all(&pool)
+        .await?;
+        type Fk = (String, String, String, Vec<String>, String, String, Vec<String>);
+        let fks: Vec<Fk> = sqlx::query_as(
+            "SELECT c.conname::text, sn.nspname::text, s.relname::text, \
+               ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(n, o) \
+                     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n ORDER BY k.o), \
+               dn.nspname::text, d.relname::text, \
+               ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY k(n, o) \
+                     JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n ORDER BY k.o) \
+             FROM pg_constraint c \
+             JOIN pg_class s ON s.oid = c.conrelid JOIN pg_namespace sn ON sn.oid = s.relnamespace \
+             JOIN pg_class d ON d.oid = c.confrelid JOIN pg_namespace dn ON dn.oid = d.relnamespace \
+             WHERE c.contype = 'f' AND (sn.nspname = $1 OR dn.nspname = $1) ORDER BY 1",
+        )
+        .bind(schema)
+        .fetch_all(&pool)
+        .await?;
+
+        let mut tables: Vec<GraphTable> = Vec::new();
+        for (table, column, type_name, nullable, is_key, est) in cols {
+            if tables.last().is_none_or(|t| t.name != table) {
+                tables.push(GraphTable {
+                    path: vec![db.into(), schema.into(), FOLDER_TABLES.into(), table.clone()],
+                    name: table,
+                    columns: Vec::new(),
+                    estimated_rows: (est >= 0).then_some(est as u64),
+                });
+            }
+            tables.last_mut().unwrap().columns.push(GraphColumn { name: column, type_name, is_key, nullable });
+        }
+        let qualify = |ns: &str, rel: &str| if ns == schema { rel.to_string() } else { format!("{ns}.{rel}") };
+        let mut relations = Vec::new();
+        for (name, sns, src, from_columns, dns, dst, to_columns) in fks {
+            for (ns, rel, cols) in [(&sns, &src, &from_columns), (&dns, &dst, &to_columns)] {
+                // Tables in other schemas appear as stubs with just the linked columns.
+                let q = qualify(ns, rel);
+                if !tables.iter().any(|t| t.name == q) {
+                    tables.push(GraphTable {
+                        path: vec![db.into(), ns.clone(), FOLDER_TABLES.into(), rel.clone()],
+                        name: q,
+                        columns: cols.iter().map(|c| GraphColumn { name: c.clone(), type_name: String::new(), is_key: false, nullable: true }).collect(),
+                        estimated_rows: None,
+                    });
+                }
+            }
+            relations.push(Relation {
+                name,
+                from_table: qualify(&sns, &src),
+                from_columns,
+                to_table: qualify(&dns, &dst),
+                to_columns,
+                inferred: false,
+            });
+        }
+        Ok(SchemaGraph { tables, relations })
     }
 
     fn classify(&self, query: &str) -> StatementKind {

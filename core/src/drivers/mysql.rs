@@ -3,24 +3,38 @@
 //! Browse tree: databases › Tables | Views | Functions › columns.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode};
-use sqlx::{Executor, MySqlPool, Row as _};
+use sqlx::{Executor, Row as _};
 use tokio_util::sync::CancellationToken;
 
+use super::sql_paging::{page_sql, split_hidden, update_statements, Dialect, KeyCol, SortCol};
 use super::sqlx_common::{self, quote_ident, Pools, StreamEnd, EXACT_COUNT_BELOW};
 use super::{approx_rows, table_path, BrowseNode, Driver, NodeKind, ServerInfo, Sink};
 use super::{FOLDER_FUNCTIONS, FOLDER_TABLES, FOLDER_VIEWS};
 use crate::config::{ConnectionConfig, TlsMode};
 use crate::error::{CoreError, Result};
 use crate::sql::{classify_sql, StatementKind};
-use crate::value::{Row, RowCount, Value, ValueKind, Window};
+use crate::table::{
+    assemble, CellEdit, ColumnMeta, GraphColumn, GraphTable, PageCursor, PagingMode, Relation, SchemaGraph, SortSpec, TableMeta,
+    TablePage,
+};
+use crate::value::{Row, RowCount, Value, ValueKind};
 
 pub(crate) struct MySqlDriver {
     pools: Pools<sqlx::MySql>,
-    keys: tokio::sync::Mutex<HashMap<(String, String), Vec<String>>>,
+    read_only: bool,
+    mariadb: bool,
+    tables: tokio::sync::Mutex<HashMap<Vec<String>, Arc<MyTable>>>,
+}
+
+struct MyTable {
+    meta: TableMeta,
+    relation: String,
+    is_view: bool,
 }
 
 impl MySqlDriver {
@@ -59,25 +73,98 @@ impl MySqlDriver {
             })
         })
         .await?;
-        Ok(Self { pools, keys: Default::default() })
+        let version: String = sqlx::query_scalar("SELECT VERSION()").fetch_one(&pools.get(None).await?).await?;
+        Ok(Self { pools, read_only, mariadb: version.contains("MariaDB"), tables: Default::default() })
     }
 
-    async fn primary_key(&self, pool: &MySqlPool, db: &str, table: &str) -> Result<Vec<String>> {
-        let key = (db.to_string(), table.to_string());
-        if let Some(k) = self.keys.lock().await.get(&key) {
-            return Ok(k.clone());
+    async fn load_table(&self, path: &[String]) -> Result<Arc<MyTable>> {
+        let (db, _, table) = table_path(path, false)?;
+        let kind = self
+            .catalog("SELECT TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?", &[db, table])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| CoreError::not_found(format!("table `{table}`")))?;
+        let is_view = kind[0] != "BASE TABLE";
+        let pk: Vec<String> = self
+            .catalog(
+                "SELECT COLUMN_NAME FROM information_schema.STATISTICS \
+                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = 'PRIMARY' ORDER BY SEQ_IN_INDEX",
+                &[db, table],
+            )
+            .await?
+            .into_iter()
+            .map(|r| r[0].clone())
+            .collect();
+        let cols = self
+            .catalog(
+                "SELECT c.COLUMN_NAME, c.COLUMN_TYPE, UPPER(c.DATA_TYPE), c.IS_NULLABLE, \
+                   IF(c.COLUMN_DEFAULT IS NULL, 'NO', 'YES'), c.EXTRA, \
+                   IF(EXISTS (SELECT 1 FROM information_schema.STATISTICS s WHERE s.TABLE_SCHEMA = c.TABLE_SCHEMA \
+                     AND s.TABLE_NAME = c.TABLE_NAME AND s.COLUMN_NAME = c.COLUMN_NAME AND s.SEQ_IN_INDEX = 1), 'YES', 'NO') \
+                 FROM information_schema.COLUMNS c WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ? ORDER BY c.ORDINAL_POSITION",
+                &[db, table],
+            )
+            .await?;
+        let read_only_reason = if self.read_only {
+            Some("This connection is read-only.".to_string())
+        } else if is_view {
+            Some("Views can't be edited here.".to_string())
+        } else if pk.is_empty() {
+            Some("This table has no primary key, so a row can't be identified safely.".to_string())
+        } else {
+            None
+        };
+        let editable = read_only_reason.is_none();
+        let columns = cols
+            .into_iter()
+            .map(|r| {
+                let column_type = r[1].clone();
+                let is_key = pk.contains(&r[0]);
+                let enum_values = enum_values(&column_type);
+                let kind = if column_type == "tinyint(1)" {
+                    ValueKind::Bool
+                } else if !enum_values.is_empty() {
+                    ValueKind::Text
+                } else {
+                    kind_of(&r[2])
+                };
+                ColumnMeta {
+                    name: r[0].clone(),
+                    kind,
+                    nullable: r[3] == "YES",
+                    has_default: r[4] == "YES",
+                    editable: editable && !is_key && !r[5].to_uppercase().contains("GENERATED"),
+                    is_key,
+                    enum_values,
+                    indexed: r[6] == "YES",
+                    type_name: column_type,
+                }
+            })
+            .collect();
+        let paging = if pk.is_empty() { PagingMode::Offset } else { PagingMode::Keyset };
+        let t = Arc::new(MyTable {
+            meta: TableMeta { columns, paging, key_columns: pk, editable, read_only_reason },
+            relation: format!("{}.{}", quote_ident(db, '`'), quote_ident(table, '`')),
+            is_view,
+        });
+        self.tables.lock().await.insert(path.to_vec(), t.clone());
+        Ok(t)
+    }
+
+    async fn table(&self, path: &[String]) -> Result<Arc<MyTable>> {
+        if let Some(t) = self.tables.lock().await.get(path) {
+            return Ok(t.clone());
         }
-        let rows = sqlx::query(
-            "SELECT COLUMN_NAME FROM information_schema.STATISTICS \
-             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = 'PRIMARY' ORDER BY SEQ_IN_INDEX",
-        )
-        .bind(db)
-        .bind(table)
-        .fetch_all(pool)
-        .await?;
-        let cols: Vec<String> = rows.iter().map(|r| text(r, 0)).collect();
-        self.keys.lock().await.insert(key, cols.clone());
-        Ok(cols)
+        self.load_table(path).await
+    }
+
+    fn statements(t: &MyTable, edits: &[CellEdit]) -> Result<Vec<String>> {
+        if let Some(reason) = &t.meta.read_only_reason {
+            return Err(CoreError::ReadOnly { message: reason.clone() });
+        }
+        let types = |c: &str| t.meta.columns.iter().find(|m| m.name == c).map(|m| m.type_name.clone());
+        update_statements(Dialect::MySql, &t.relation, &t.meta.key_columns, &types, edits)
     }
 
     /// Runs a catalog query and returns its rows as text.
@@ -89,6 +176,32 @@ impl MySqlDriver {
         let rows = q.fetch_all(&self.pools.get(None).await?).await?;
         Ok(rows.iter().map(|r| (0..r.len()).map(|i| text(r, i)).collect()).collect())
     }
+}
+
+/// `enum('a','b''c')` → ["a", "b'c"].
+fn enum_values(column_type: &str) -> Vec<String> {
+    let Some(inner) = column_type.strip_prefix("enum(").and_then(|r| r.strip_suffix(')')) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = inner.chars().peekable();
+    let mut quoted = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if quoted && chars.peek() == Some(&'\'') => {
+                cur.push('\'');
+                chars.next();
+            }
+            '\'' => {
+                quoted = !quoted;
+                if !quoted {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c if quoted => cur.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Reads any column as text without type checks. MySQL 8 reports some
@@ -126,7 +239,12 @@ fn decode(row: &MySqlRow, kinds: &[ValueKind]) -> Row {
         .enumerate()
         .map(|(i, &kind)| match row.try_get_unchecked::<Option<Vec<u8>>, _>(i) {
             Ok(None) => Value::Null,
-            Ok(Some(v)) if kind == ValueKind::Bytes => Value::Bytes { v },
+            // Text with a binary collation (utf8mb4_bin) arrives flagged as
+            // binary; keep real bytes as bytes and show text as text.
+            Ok(Some(v)) if kind == ValueKind::Bytes => match String::from_utf8(v) {
+                Ok(text) => Value::Text { v: text },
+                Err(e) => Value::Bytes { v: e.into_bytes() },
+            },
             Ok(Some(v)) => Value::from_text(kind, &String::from_utf8_lossy(&v)),
             Err(e) => Value::text(format!("<{e}>")),
         })
@@ -259,28 +377,35 @@ impl Driver for MySqlDriver {
         }
     }
 
-    async fn fetch_window(&self, path: &[String], offset: u64, limit: u32) -> Result<Window> {
-        let (db, _, table) = table_path(path, false)?;
-        let pool = self.pools.get(None).await?;
-        let relation = format!("{}.{}", quote_ident(db, '`'), quote_ident(table, '`'));
-        let pk = self.primary_key(&pool, db, table).await?;
-        let order = if pk.is_empty() {
-            String::new()
-        } else {
-            let cols: Vec<String> = pk.iter().map(|c| quote_ident(c, '`')).collect();
-            format!(" ORDER BY {}", cols.join(", "))
-        };
-        let sql = format!("SELECT * FROM {relation}{order} LIMIT {limit} OFFSET {offset}");
-        let mut window = sqlx_common::collect(&pool, &sql, kind_of, decode).await?;
-        if window.columns.is_empty() {
-            let probe = format!("SELECT * FROM {relation} LIMIT 0");
-            window.columns = sqlx_common::describe(&pool, &probe, kind_of).await.unwrap_or_default();
-        }
-        Ok(window)
+    async fn table_meta(&self, path: &[String]) -> Result<TableMeta> {
+        Ok(self.load_table(path).await?.meta.clone())
     }
 
-    async fn row_count(&self, path: &[String]) -> Result<RowCount> {
+    async fn fetch_page(&self, path: &[String], cursor: &PageCursor, size: u32, sort: Option<&SortSpec>) -> Result<TablePage> {
+        let t = self.table(path).await?;
+        let pool = self.pools.get(None).await?;
+        let key_col = |name: &str| KeyCol { expr: quote_ident(name, '`'), cast: None };
+        let keys: Vec<KeyCol> = t.meta.key_columns.iter().map(|k| key_col(k)).collect();
+        let sort_col = match sort {
+            Some(s) if t.meta.columns.iter().any(|c| c.name == s.column) => Some((key_col(&s.column), s.descending, t.meta.columns.iter().find(|c| c.name == s.column).is_none_or(|c| c.nullable))),
+            Some(s) => return Err(CoreError::not_found(format!("column `{}`", s.column))),
+            None => None,
+        };
+        let sort = sort_col.as_ref().map(|(col, descending, nullable)| SortCol { col, descending: *descending, nullable: *nullable });
+        let (sql, hidden) = page_sql(Dialect::MySql, &t.relation, &keys, sort, cursor, size)?;
+        let mut window = sqlx_common::collect(&pool, &sql, kind_of, decode).await?;
+        if window.columns.is_empty() {
+            let probe = format!("SELECT * FROM {} LIMIT 0", t.relation);
+            let cols = sqlx_common::describe(&pool, &probe, kind_of).await.unwrap_or_default();
+            window.columns = std::iter::repeat_n(cols.first().cloned(), hidden).flatten().chain(cols).collect();
+        }
+        let fetched = split_hidden(window, hidden, hidden > keys.len(), !keys.is_empty());
+        Ok(assemble(fetched, cursor, size as usize, !keys.is_empty()))
+    }
+
+    async fn row_count(&self, path: &[String], exact: bool) -> Result<RowCount> {
         let (db, _, table) = table_path(path, false)?;
+        let t = self.table(path).await?;
         let est = self
             .catalog(
                 "SELECT TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
@@ -290,12 +415,104 @@ impl Driver for MySqlDriver {
             .into_iter()
             .next()
             .and_then(|r| r[0].parse::<i64>().ok());
-        if let Some(est) = est.filter(|&e| e >= EXACT_COUNT_BELOW) {
+        if let Some(est) = est.filter(|&e| !exact && !t.is_view && e >= EXACT_COUNT_BELOW) {
             return Ok(RowCount { count: est as u64, exact: false });
         }
-        let sql = format!("SELECT COUNT(*) FROM {}.{}", quote_ident(db, '`'), quote_ident(table, '`'));
+        // Bounded: an exact count of a huge table must not run forever.
+        let sql = if self.mariadb {
+            format!("SET STATEMENT max_statement_time = 60 FOR SELECT COUNT(*) FROM {}", t.relation)
+        } else {
+            format!("SELECT /*+ MAX_EXECUTION_TIME(60000) */ COUNT(*) FROM {}", t.relation)
+        };
         let count: i64 = sqlx::query_scalar(&sql).fetch_one(&self.pools.get(None).await?).await?;
         Ok(RowCount { count: count as u64, exact: true })
+    }
+
+    async fn preview_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<Vec<String>> {
+        Self::statements(&*self.table(path).await?, edits)
+    }
+
+    async fn apply_edits(&self, path: &[String], edits: &[CellEdit]) -> Result<u64> {
+        let t = self.table(path).await?;
+        let statements = Self::statements(&t, edits)?;
+        let mut tx = self.pools.get(None).await?.begin().await?;
+        for (i, sql) in statements.iter().enumerate() {
+            if tx.execute(sql.as_str()).await?.rows_affected() != 1 {
+                return Err(CoreError::query(format!(
+                    "change {} matched no row (it was changed or deleted elsewhere); nothing was saved",
+                    i + 1
+                )));
+            }
+        }
+        tx.commit().await?;
+        Ok(statements.len() as u64)
+    }
+
+    async fn schema_graph(&self, path: &[String]) -> Result<SchemaGraph> {
+        let db = path.first().ok_or_else(|| CoreError::invalid("choose a database"))?;
+        let cols = self
+            .catalog(
+                "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY, t.TABLE_ROWS \
+                 FROM information_schema.COLUMNS c JOIN information_schema.TABLES t \
+                   ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME \
+                 WHERE c.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE' \
+                 ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION",
+                &[db],
+            )
+            .await?;
+        let fks = self
+            .catalog(
+                "SELECT CONSTRAINT_NAME, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, \
+                   REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE \
+                 WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL \
+                 ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION",
+                &[db],
+            )
+            .await?;
+        let mut tables: Vec<GraphTable> = Vec::new();
+        for r in cols {
+            if tables.last().is_none_or(|t| t.name != r[0]) {
+                tables.push(GraphTable {
+                    path: vec![db.clone(), FOLDER_TABLES.into(), r[0].clone()],
+                    name: r[0].clone(),
+                    columns: Vec::new(),
+                    estimated_rows: r[5].parse().ok(),
+                });
+            }
+            tables.last_mut().unwrap().columns.push(GraphColumn {
+                name: r[1].clone(),
+                type_name: r[2].clone(),
+                nullable: r[3] == "YES",
+                is_key: r[4] == "PRI",
+            });
+        }
+        let mut relations: Vec<Relation> = Vec::new();
+        for r in fks {
+            let to_table = if &r[3] == db { r[4].clone() } else { format!("{}.{}", r[3], r[4]) };
+            if !tables.iter().any(|t| t.name == to_table) {
+                tables.push(GraphTable {
+                    path: vec![r[3].clone(), FOLDER_TABLES.into(), r[4].clone()],
+                    name: to_table.clone(),
+                    columns: vec![GraphColumn { name: r[5].clone(), type_name: String::new(), is_key: true, nullable: false }],
+                    estimated_rows: None,
+                });
+            }
+            match relations.last_mut() {
+                Some(rel) if rel.name == r[0] && rel.from_table == r[1] => {
+                    rel.from_columns.push(r[2].clone());
+                    rel.to_columns.push(r[5].clone());
+                }
+                _ => relations.push(Relation {
+                    name: r[0].clone(),
+                    from_table: r[1].clone(),
+                    from_columns: vec![r[2].clone()],
+                    to_table,
+                    to_columns: vec![r[5].clone()],
+                    inferred: false,
+                }),
+            }
+        }
+        Ok(SchemaGraph { tables, relations })
     }
 
     fn classify(&self, query: &str) -> StatementKind {

@@ -45,11 +45,18 @@ async fn suite(engine: &str, expect_name: &str) {
     assert_eq!(rows.len(), 100_000);
     assert!(largest <= 500);
 
+    let digits = "(SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 \
+                  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)";
     exec(
         s,
-        "DROP TABLE IF EXISTS dbclient_it; \
-         CREATE TABLE dbclient_it (id INT PRIMARY KEY, name VARCHAR(20) NOT NULL); \
-         INSERT INTO dbclient_it VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+        &format!(
+            "DROP TABLE IF EXISTS dbclient_child, dbclient_parent, dbclient_it; \
+             CREATE TABLE dbclient_it (id INT PRIMARY KEY, name VARCHAR(20) NULL) COLLATE utf8mb4_bin; \
+             INSERT INTO dbclient_it SELECT x, IF(x % 10 = 0, NULL, CONCAT('n', LPAD(x % 37, 2, '0'))) \
+               FROM (SELECT a.n + b.n * 10 + c.n * 100 + 1 AS x FROM {digits} a, {digits} b, {digits} c) t; \
+             CREATE TABLE dbclient_parent (id INT PRIMARY KEY); \
+             CREATE TABLE dbclient_child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES dbclient_parent(id))"
+        ),
     )
     .await;
     let db = s.config().database;
@@ -60,12 +67,10 @@ async fn suite(engine: &str, expect_name: &str) {
     // MySQL 8 says `int`, MariaDB keeps the display width: `int(11)`.
     let detail = cols[0].detail.clone().unwrap_or_default();
     assert!(detail.starts_with("int") && detail.ends_with("· PK"), "{detail}");
-    let w = s.fetch_window(path.clone(), 1, 1).await.unwrap();
-    assert_eq!(w.rows[0].cells[0], Value::Int { v: 2 });
-    assert_eq!(s.row_count(path).await.unwrap().count, 3);
+    common::sql_table_suite(s, path, vec![db.clone()]).await;
 
     assert_cancels(s, "SELECT SLEEP(30)").await;
-    exec(s, "DROP TABLE dbclient_it").await;
+    exec(s, "DROP TABLE dbclient_child, dbclient_parent, dbclient_it").await;
 }
 
 #[tokio::test]

@@ -42,6 +42,8 @@ enum DataColors {
     static let bool = NSColor.adaptive(light: 0x8A3FB5, dark: 0xD2A8FF)
     static let date = NSColor.adaptive(light: 0x8A4B00, dark: 0xF0B37E)
     static let json = NSColor.adaptive(light: 0x1E7A3A, dark: 0x85E89D)
+    /// Background of cells with unsaved edits.
+    static let staged = NSColor.adaptive(light: 0xFFF3B0, dark: 0x5C4A00)
 
     static func color(for kind: ValueKind, value: Value) -> NSColor {
         if value.isNull { return .secondaryLabelColor }

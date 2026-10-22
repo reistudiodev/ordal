@@ -8,3 +8,6 @@ swift/lib/*
 !swift/lib/.gitkeep
 # Added by code-review-graph
 .code-review-graph/
+
+# Local dev data for the "dev data" and "UI snapshots" launch configs
+/.dev
