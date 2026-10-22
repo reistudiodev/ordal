@@ -17,62 +17,12 @@ public struct WorkspaceView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Top Toolbar & Connection Header
-            topBar
+            WorkspaceTopBar(container: container, workspace: workspace)
 
-            // Main Content Area: Sidebar + Active Tab Content + Inspector
             HStack(spacing: 0) {
-                // Left Sidebar: Object Browser (Databases, Schemas, Tables)
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Schema Browser")
-                            .font(.caption)
-                            .foregroundColor(Color(white: 0.5))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.adaptive(light: Color(white: 0.92), dark: Color(white: 0.16)))
+                sidebarArea
+                centerWorkArea
 
-                    ObjectBrowser(container: container, workspace: workspace)
-                }
-                .frame(minWidth: 220, maxWidth: 280)
-                .background(Color.adaptive(light: Color(white: 0.96), dark: Color(white: 0.14)))
-
-                // Center Main Work Area: TabBar + Tab Content
-                VStack(spacing: 0) {
-                    tabBar
-
-                    // Tab Content
-                    if let tab = workspace.selectedTab {
-                        switch tab {
-                        case .query(let queryTab):
-                            QueryTabView(container: container, tab: queryTab, workspace: workspace)
-                        case .table(let tableTab):
-                            TableTabView(container: container, tab: tableTab, workspace: workspace)
-                        case .schema(let schemaTab):
-                            SchemaDiagramTabView(container: container, tab: schemaTab, workspace: workspace)
-                        }
-                    } else {
-                        VStack(spacing: 12) {
-                            Spacer()
-                            Text("No open tabs")
-                                .font(.title2)
-                                .foregroundColor(Color(white: 0.5))
-                            Text("Select a table from the sidebar or open a new query.")
-                                .font(.body)
-                                .foregroundColor(Color(white: 0.4))
-                            Button("New Query Tab (Ctrl+T)") {
-                                workspace.newQueryTab()
-                                container.notifyUpdate()
-                            }
-                            Spacer()
-                        }
-                    }
-                }
-                .frame(minWidth: 400)
-
-                // Right Sidebar: Inspector & Cell Editor
                 if app.showInspector {
                     InspectorView(
                         container: container,
@@ -85,15 +35,78 @@ public struct WorkspaceView: View {
                 }
             }
 
-            // Bottom Status Bar
-            statusBar
+            WorkspaceStatusBar(workspace: workspace)
         }
     }
 
-    // MARK: - Top Bar
-    private var topBar: some View {
+    private var sidebarArea: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Schema Browser")
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.5))
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.adaptive(light: Color(white: 0.92), dark: Color(white: 0.16)))
+
+            ObjectBrowser(container: container, workspace: workspace)
+        }
+        .frame(minWidth: 220, maxWidth: 280)
+        .background(Color.adaptive(light: Color(white: 0.96), dark: Color(white: 0.14)))
+    }
+
+    private var centerWorkArea: some View {
+        VStack(spacing: 0) {
+            WorkspaceTabBar(container: container, workspace: workspace)
+            tabContentArea
+        }
+        .frame(minWidth: 400)
+    }
+
+    @ViewBuilder
+    private var tabContentArea: some View {
+        if let tab = workspace.selectedTab {
+            switch tab {
+            case .query(let queryTab):
+                QueryTabView(container: container, tab: queryTab, workspace: workspace)
+            case .table(let tableTab):
+                TableTabView(container: container, tab: tableTab, workspace: workspace)
+            case .schema(let schemaTab):
+                SchemaDiagramTabView(container: container, tab: schemaTab, workspace: workspace)
+            }
+        } else {
+            emptyTabPlaceholder
+        }
+    }
+
+    private var emptyTabPlaceholder: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Text("No open tabs")
+                .font(.title2)
+                .foregroundColor(Color(white: 0.5))
+            Text("Select a table from the sidebar or open a new query.")
+                .font(.body)
+                .foregroundColor(Color(white: 0.4))
+            Button("New Query Tab (Ctrl+T)") {
+                workspace.newQueryTab()
+                container.notifyUpdate()
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct WorkspaceTopBar: View {
+    let container: AppStateContainer
+    let workspace: WorkspaceModel
+
+    private var app: AppState { container.app }
+
+    var body: some View {
         HStack(spacing: 12) {
-            // Environment / Connection Accent Dot
             Circle()
                 .foregroundColor(Color.from(pair: workspace.config.accentColors))
                 .frame(width: 10, height: 10)
@@ -158,16 +171,15 @@ public struct WorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(
-            Color.adaptive(
-                light: Color(white: 0.93),
-                dark: Color(white: 0.18)
-            )
-        )
+        .background(Color.adaptive(light: Color(white: 0.93), dark: Color(white: 0.18)))
     }
+}
 
-    // MARK: - Tab Bar
-    private var tabBar: some View {
+private struct WorkspaceTabBar: View {
+    let container: AppStateContainer
+    let workspace: WorkspaceModel
+
+    var body: some View {
         HStack(spacing: 2) {
             ScrollView(.horizontal) {
                 HStack(spacing: 2) {
@@ -207,18 +219,15 @@ public struct WorkspaceView: View {
             }
             .padding(.horizontal, 8)
         }
-        .background(
-            Color.adaptive(
-                light: Color(white: 0.89),
-                dark: Color(white: 0.14)
-            )
-        )
+        .background(Color.adaptive(light: Color(white: 0.89), dark: Color(white: 0.14)))
     }
+}
 
-    // MARK: - Status Bar
-    private var statusBar: some View {
+private struct WorkspaceStatusBar: View {
+    let workspace: WorkspaceModel
+
+    var body: some View {
         HStack(spacing: 16) {
-            // Connection Status Dot & Label
             HStack(spacing: 6) {
                 let statusColor: Color = {
                     switch workspace.state {
@@ -258,12 +267,7 @@ public struct WorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(
-            Color.adaptive(
-                light: Color(white: 0.94),
-                dark: Color(white: 0.17)
-            )
-        )
+        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.17)))
     }
 
     private var statusText: String {

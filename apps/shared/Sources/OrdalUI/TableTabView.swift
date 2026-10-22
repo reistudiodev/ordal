@@ -3,8 +3,7 @@ import OrdalCore
 import OrdalKit
 import SwiftCrossUI
 
-/// Native cross-platform Table Tab View with Data, Structure, and DDL inspection,
-/// plus staged cell editing, review changes dialog, and MongoDB document support.
+/// Native cross-platform Table Tab View with Data, Structure, and DDL inspection.
 public struct TableTabView: View {
     let container: AppStateContainer
     let tab: TableTabModel
@@ -20,194 +19,234 @@ public struct TableTabView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Segment Header
-            HStack(spacing: 8) {
-                Button(tab.segment == .data ? "● Data" : "Data") {
-                    tab.segment = .data
-                    container.notifyUpdate()
-                }
-                Button(tab.segment == .structure ? "● Structure" : "Structure") {
-                    tab.segment = .structure
-                    Task {
-                        await tab.loadStructure()
-                        container.notifyUpdate()
-                    }
-                }
-                Button(tab.segment == .ddl ? "● DDL" : "DDL") {
-                    tab.segment = .ddl
-                    Task {
-                        await tab.loadStructure()
-                        container.notifyUpdate()
-                    }
-                }
-
-                Spacer()
-
-                if !tab.pager.staged.isEmpty {
-                    Button("Review Changes (\(tab.pager.staged.count))") {
-                        showReviewDialog = true
-                    }
-                    .foregroundColor(Color.hex(0x856404))
-                }
-
-                Button("🔄 Refresh") {
-                    Task {
-                        await tab.pager.refresh()
-                        await tab.loadStructure()
-                        container.notifyUpdate()
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                Color.adaptive(
-                    light: Color(white: 0.95),
-                    dark: Color(white: 0.18)
-                )
-            )
-
-            // Content according to selected segment
-            switch tab.segment {
-            case .data:
-                dataView
-            case .structure:
-                structureView
-            case .ddl:
-                ddlView
-            case .query:
-                QueryTabView(container: container, tab: tab.query, workspace: workspace)
-            }
+            segmentHeader
+            contentSegment
         }
         .overlay {
             if showReviewDialog {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        ReviewChangesDialog(
-                            container: container,
-                            pager: tab.pager,
-                            config: workspace.config,
-                            onDismiss: {
-                                showReviewDialog = false
-                                container.notifyUpdate()
-                            }
-                        )
-                        Spacer()
-                    }
-                    Spacer()
-                }
-                .background(Color(white: 0.0, opacity: 0.5))
+                reviewDialogOverlay
             }
         }
     }
 
-    // MARK: - Data View
-    private var dataView: some View {
-        let pager = tab.pager
-        return VStack(spacing: 0) {
-            // Staged changes banner
-            if !pager.staged.isEmpty {
-                HStack(spacing: 12) {
-                    Text("⚠️ \(pager.staged.count) staged change(s)")
-                        .font(.caption)
-                        .foregroundColor(Color.hex(0x856404))
-
-                    Spacer()
-
-                    Button("Review & Apply") {
-                        showReviewDialog = true
-                    }
-
-                    Button("Discard All") {
-                        pager.discardEdits()
-                        container.notifyUpdate()
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.from(pair: DataPalette.staged))
+    private var segmentHeader: some View {
+        HStack(spacing: 8) {
+            Button(tab.segment == .data ? "● Data" : "Data") {
+                tab.segment = .data
+                container.notifyUpdate()
             }
-
-            // Results grid or Document view
-            if pager.hasDocuments {
-                DocumentListView(
-                    source: pager,
-                    onSelectField: { rowIndex, fieldName in
-                        if let colIndex = pager.columnIndex(of: fieldName),
-                           let col = pager.columns.first(where: { $0.name == fieldName }),
-                           let row = pager.row(at: rowIndex) {
-                            let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
-                            workspace.inspected = WorkspaceModel.InspectedCell(column: col, value: val, row: rowIndex, columnIndex: colIndex, tableTab: tab.id)
-                            container.app.showInspector = true
-                            container.notifyUpdate()
-                        }
-                    }
-                )
-            } else {
-                ResultGrid(
-                    source: pager,
-                    onSelectCell: { rowIndex, colIndex in
-                        if colIndex < pager.columns.count,
-                           let row = pager.row(at: rowIndex) {
-                            let col = pager.columns[colIndex]
-                            let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
-                            workspace.inspected = WorkspaceModel.InspectedCell(column: col, value: val, row: rowIndex, columnIndex: colIndex, tableTab: tab.id)
-                            container.app.showInspector = true
-                            container.notifyUpdate()
-                        }
-                    },
-                    onSortColumn: { column in
-                        Task {
-                            await pager.toggleSort(column: column)
-                            container.notifyUpdate()
-                        }
-                    }
-                )
-            }
-
-            // Pagination Footer Bar
-            HStack(spacing: 12) {
-                Button("◀ Previous") {
-                    Task {
-                        await pager.prev()
-                        container.notifyUpdate()
-                    }
-                }
-
-                Text(pager.rangeText)
-                    .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
-
-                Button("Next ▶") {
-                    Task {
-                        await pager.next()
-                        container.notifyUpdate()
-                    }
-                }
-
-                Spacer()
-
-                if pager.isLoading {
-                    Text("Loading...")
-                        .font(.caption)
-                        .foregroundColor(Color.hex(0x007ACC))
+            Button(tab.segment == .structure ? "● Structure" : "Structure") {
+                tab.segment = .structure
+                Task {
+                    await tab.loadStructure()
+                    container.notifyUpdate()
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Color.adaptive(
-                    light: Color(white: 0.94),
-                    dark: Color(white: 0.19)
-                )
+            Button(tab.segment == .ddl ? "● DDL" : "DDL") {
+                tab.segment = .ddl
+                Task {
+                    await tab.loadStructure()
+                    container.notifyUpdate()
+                }
+            }
+
+            Spacer()
+
+            if !tab.pager.staged.isEmpty {
+                Button("Review Changes (\(tab.pager.staged.count))") {
+                    showReviewDialog = true
+                }
+                .foregroundColor(Color.hex(0x856404))
+            }
+
+            Button("🔄 Refresh") {
+                Task {
+                    await tab.pager.refresh()
+                    await tab.loadStructure()
+                    container.notifyUpdate()
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.adaptive(light: Color(white: 0.95), dark: Color(white: 0.18)))
+    }
+
+    @ViewBuilder
+    private var contentSegment: some View {
+        switch tab.segment {
+        case .data:
+            TableDataView(
+                container: container,
+                tab: tab,
+                workspace: workspace,
+                onShowReview: { showReviewDialog = true }
             )
+        case .structure:
+            TableStructureView(tab: tab)
+        case .ddl:
+            TableDDLView(tab: tab)
+        case .query:
+            QueryTabView(container: container, tab: tab.query, workspace: workspace)
         }
     }
 
-    // MARK: - Structure View
-    private var structureView: some View {
+    private var reviewDialogOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                ReviewChangesDialog(
+                    container: container,
+                    pager: tab.pager,
+                    config: workspace.config,
+                    onDismiss: {
+                        showReviewDialog = false
+                        container.notifyUpdate()
+                    }
+                )
+                Spacer()
+            }
+            Spacer()
+        }
+        .background(Color(white: 0.0, opacity: 0.5))
+    }
+}
+
+private struct TableDataView: View {
+    let container: AppStateContainer
+    let tab: TableTabModel
+    let workspace: WorkspaceModel
+    let onShowReview: () -> Void
+
+    private var pager: TablePager { tab.pager }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !pager.staged.isEmpty {
+                stagedBanner
+            }
+
+            if pager.hasDocuments {
+                documentListView
+            } else {
+                resultGridView
+            }
+
+            paginationFooter
+        }
+    }
+
+    private var stagedBanner: some View {
+        HStack(spacing: 12) {
+            Text("⚠️ \(pager.staged.count) staged change(s)")
+                .font(.caption)
+                .foregroundColor(Color.hex(0x856404))
+
+            Spacer()
+
+            Button("Review & Apply") {
+                onShowReview()
+            }
+
+            Button("Discard All") {
+                pager.discardEdits()
+                container.notifyUpdate()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.from(pair: DataPalette.staged))
+    }
+
+    private var documentListView: some View {
+        DocumentListView(
+            source: pager,
+            onSelectField: { rowIndex, fieldName in
+                if let colIndex = pager.columnIndex(of: fieldName),
+                   let col = pager.columns.first(where: { $0.name == fieldName }),
+                   let row = pager.row(at: rowIndex) {
+                    let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
+                    workspace.inspected = WorkspaceModel.InspectedCell(
+                        column: col,
+                        value: val,
+                        row: rowIndex,
+                        columnIndex: colIndex,
+                        tableTab: tab.id
+                    )
+                    container.app.showInspector = true
+                    container.notifyUpdate()
+                }
+            }
+        )
+    }
+
+    private var resultGridView: some View {
+        ResultGrid(
+            source: pager,
+            onSelectCell: { rowIndex, colIndex in
+                if colIndex < pager.columns.count,
+                   let row = pager.row(at: rowIndex) {
+                    let col = pager.columns[colIndex]
+                    let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
+                    workspace.inspected = WorkspaceModel.InspectedCell(
+                        column: col,
+                        value: val,
+                        row: rowIndex,
+                        columnIndex: colIndex,
+                        tableTab: tab.id
+                    )
+                    container.app.showInspector = true
+                    container.notifyUpdate()
+                }
+            },
+            onSortColumn: { column in
+                Task {
+                    await pager.toggleSort(column: column)
+                    container.notifyUpdate()
+                }
+            }
+        )
+    }
+
+    private var paginationFooter: some View {
+        HStack(spacing: 12) {
+            Button("◀ Previous") {
+                Task {
+                    await pager.prev()
+                    container.notifyUpdate()
+                }
+            }
+
+            Text(pager.rangeText)
+                .font(.caption)
+                .foregroundColor(Color(white: 0.5))
+
+            Button("Next ▶") {
+                Task {
+                    await pager.next()
+                    container.notifyUpdate()
+                }
+            }
+
+            Spacer()
+
+            if pager.isLoading {
+                Text("Loading...")
+                    .font(.caption)
+                    .foregroundColor(Color.hex(0x007ACC))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.19)))
+    }
+}
+
+private struct TableStructureView: View {
+    let tab: TableTabModel
+
+    var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 8) {
                 if let err = tab.structureError {
@@ -221,18 +260,16 @@ public struct TableTabView: View {
                         .foregroundColor(Color(white: 0.5))
                         .padding(16)
                 } else {
-                    HStack(spacing: 12) {
-                        Text("Name").font(.caption).frame(minWidth: 160, alignment: .leading)
-                        Text("Type / Details").font(.caption).frame(minWidth: 180, alignment: .leading)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
-
+                    structureHeader
                     ForEach(tab.structure, id: \.name) { node in
                         HStack(spacing: 12) {
-                            Text(node.name).font(.system(size: 13, design: .monospaced)).frame(minWidth: 160, alignment: .leading)
-                            Text(node.detail ?? "-").font(.caption).foregroundColor(Color.hex(0x007ACC)).frame(minWidth: 180, alignment: .leading)
+                            Text(node.name)
+                                .font(.system(size: 13, design: .monospaced))
+                                .frame(minWidth: 160, alignment: .leading)
+                            Text(node.detail ?? "-")
+                                .font(.caption)
+                                .foregroundColor(Color.hex(0x007ACC))
+                                .frame(minWidth: 180, alignment: .leading)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -243,8 +280,21 @@ public struct TableTabView: View {
         }
     }
 
-    // MARK: - DDL View
-    private var ddlView: some View {
+    private var structureHeader: some View {
+        HStack(spacing: 12) {
+            Text("Name").font(.caption).frame(minWidth: 160, alignment: .leading)
+            Text("Type / Details").font(.caption).frame(minWidth: 180, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
+    }
+}
+
+private struct TableDDLView: View {
+    let tab: TableTabModel
+
+    var body: some View {
         ScrollView([.horizontal, .vertical]) {
             VStack(alignment: .leading, spacing: 8) {
                 if !tab.ddl.isEmpty {

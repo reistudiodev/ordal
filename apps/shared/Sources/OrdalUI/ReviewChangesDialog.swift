@@ -61,28 +61,49 @@ public struct ReviewChangesDialog: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack(spacing: 8) {
-                Text(isProd ? "⚠️" : "📝")
-                    .font(.title2)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Review \(pager.staged.count) Pending Change(s)")
-                        .font(.headline)
-                    Text("\(pager.path.last ?? "") · \(config.name)\(isProd ? " · Production" : "")")
-                        .font(.caption)
-                        .foregroundColor(Color(white: 0.5))
-                }
-
-                Spacer()
-
-                Button("✕") {
-                    onDismiss()
-                }
+            headerView
+            changesListView
+            statementsSection
+            if isProd {
+                productionGuardView
             }
-            .padding(.bottom, 4)
+            if let applyError {
+                Text("Error applying changes: \(applyError)")
+                    .font(.caption)
+                    .foregroundColor(Color.hex(0xDC3545))
+            }
+            actionsFooterView
+        }
+        .padding(16)
+        .frame(minWidth: 560, maxWidth: 680)
+        .background(Color.adaptive(light: Color(white: 1.0), dark: Color(white: 0.18)))
+        .cornerRadius(8)
+    }
 
-            // Table of Changes
+    private var headerView: some View {
+        HStack(spacing: 8) {
+            Text(isProd ? "⚠️" : "📝")
+                .font(.title2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Review \(pager.staged.count) Pending Change(s)")
+                    .font(.headline)
+                Text("\(pager.path.last ?? "") · \(config.name)\(isProd ? " · Production" : "")")
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.5))
+            }
+
+            Spacer()
+
+            Button("✕") {
+                onDismiss()
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var changesListView: some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Modified Fields:")
                 .font(.caption)
                 .foregroundColor(Color(white: 0.5))
@@ -100,32 +121,18 @@ public struct ReviewChangesDialog: View {
                     .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
 
                     ForEach(changeItems, id: \.id) { item in
-                        HStack(spacing: 8) {
-                            Text(item.keyText.isEmpty ? "-" : item.keyText)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(minWidth: 100, alignment: .leading)
-                            Text(item.column)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(minWidth: 120, alignment: .leading)
-                            Text(item.oldText)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Color(white: 0.5))
-                                .frame(minWidth: 140, alignment: .leading)
-                            Text(item.newText)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Color.hex(0x28A745))
-                                .frame(minWidth: 140, alignment: .leading)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        PendingChangeRowView(item: item)
                     }
                 }
             }
             .frame(maxHeight: 160)
             .background(Color.adaptive(light: Color(white: 0.95), dark: Color(white: 0.16)))
             .cornerRadius(4)
+        }
+    }
 
-            // SQL / Command preview
+    private var statementsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(config.kind == .mongoDb ? "Generated Commands:" : "Generated SQL Statements:")
                     .font(.caption)
@@ -138,77 +145,50 @@ public struct ReviewChangesDialog: View {
                 }
             }
 
-            ScrollView([.horizontal, .vertical]) {
-                VStack(alignment: .leading) {
-                    let previewText: String = {
-                        if let err = previewError {
-                            return "Error generating preview: \(err)"
-                        }
-                        if statements.isEmpty {
-                            return didLoadStatements ? "-- No statements generated" : "-- Click 'Preview Statements' to inspect SQL"
-                        }
-                        return statements.joined(separator: ";\n") + ";"
-                    }()
-
-                    Text(previewText)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(previewError != nil ? Color.hex(0xDC3545) : Color(white: 0.8))
-                        .padding(8)
-                }
-            }
-            .frame(minHeight: 80, maxHeight: 140)
-            .background(Color.adaptive(light: Color(white: 0.92), dark: Color(white: 0.12)))
-            .cornerRadius(4)
-
-            // Production safety prompt
-            if isProd {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("⚠️ Production Safeguard: Type **\(expectedName)** to confirm:")
-                        .font(.caption)
-                        .foregroundColor(Color.hex(0xDC3545))
-
-                    TextField(
-                        "Database or connection name",
-                        text: Binding(
-                            get: { confirmationInput },
-                            set: { confirmationInput = $0 }
-                        )
-                    )
-                }
-            }
-
-            // Error display
-            if let applyError {
-                Text("Error applying changes: \(applyError)")
-                    .font(.caption)
-                    .foregroundColor(Color.hex(0xDC3545))
-            }
-
-            // Action Buttons
-            HStack {
-                Button("Discard All") {
-                    pager.discardEdits()
-                    container.notifyUpdate()
-                    onDismiss()
-                }
-
-                Spacer()
-
-                Button("Cancel") {
-                    onDismiss()
-                }
-
-                Button(isApplying ? "Applying..." : "Apply Changes") {
-                    applyChanges()
-                }
-                .disabled(!canApply)
-            }
-            .padding(.top, 8)
+            StatementPreviewBoxView(
+                statements: statements,
+                previewError: previewError,
+                didLoadStatements: didLoadStatements
+            )
         }
-        .padding(16)
-        .frame(minWidth: 560, maxWidth: 680)
-        .background(Color.adaptive(light: Color(white: 1.0), dark: Color(white: 0.18)))
-        .cornerRadius(8)
+    }
+
+    private var productionGuardView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("⚠️ Production Safeguard: Type **\(expectedName)** to confirm:")
+                .font(.caption)
+                .foregroundColor(Color.hex(0xDC3545))
+
+            TextField(
+                "Database or connection name",
+                text: Binding(
+                    get: { confirmationInput },
+                    set: { confirmationInput = $0 }
+                )
+            )
+        }
+    }
+
+    private var actionsFooterView: some View {
+        HStack {
+            Button("Discard All") {
+                pager.discardEdits()
+                container.notifyUpdate()
+                onDismiss()
+            }
+
+            Spacer()
+
+            Button("Cancel") {
+                onDismiss()
+            }
+
+            Button(isApplying ? "Applying..." : "Apply Changes") {
+                applyChanges()
+            }
+            .disabled(!canApply)
+        }
+        .padding(.top, 8)
     }
 
     private func loadPreview() {
@@ -240,5 +220,60 @@ public struct ReviewChangesDialog: View {
                 container.notifyUpdate()
             }
         }
+    }
+}
+
+private struct PendingChangeRowView: View {
+    let item: PendingChangeItem
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(item.keyText.isEmpty ? "-" : item.keyText)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(minWidth: 100, alignment: .leading)
+            Text(item.column)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(minWidth: 120, alignment: .leading)
+            Text(item.oldText)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Color(white: 0.5))
+                .frame(minWidth: 140, alignment: .leading)
+            Text(item.newText)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Color.hex(0x28A745))
+                .frame(minWidth: 140, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct StatementPreviewBoxView: View {
+    let statements: [String]
+    let previewError: String?
+    let didLoadStatements: Bool
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            VStack(alignment: .leading) {
+                let previewText: String = {
+                    if let err = previewError {
+                        return "Error generating preview: \(err)"
+                    }
+                    if statements.isEmpty {
+                        return didLoadStatements ? "-- No statements generated" : "-- Click 'Preview Statements' to inspect SQL"
+                    }
+                    return statements.joined(separator: ";\n") + ";"
+                }()
+
+                Text(previewText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(previewError != nil ? Color.hex(0xDC3545) : Color(white: 0.8))
+                    .padding(8)
+            }
+        }
+        .frame(minHeight: 80, maxHeight: 140)
+        .background(Color.adaptive(light: Color(white: 0.92), dark: Color(white: 0.12)))
+        .cornerRadius(4)
     }
 }

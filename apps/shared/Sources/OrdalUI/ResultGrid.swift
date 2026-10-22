@@ -62,32 +62,12 @@ public struct ResultGrid: View {
             }
         } else {
             VStack(spacing: 0) {
-                // Header row
-                ScrollView(.horizontal) {
-                    HStack(spacing: 1) {
-                        ForEach(columnsIndexed, id: \.id) { colItem in
-                            let col = colItem.column
-                            let sort = source.sort
-                            let isSorted = sort?.column == col.name
-                            let sortArrow = isSorted ? (sort?.descending == true ? " ↓" : " ↑") : ""
+                GridHeaderView(
+                    columns: columnsIndexed,
+                    sort: source.sort,
+                    onSortColumn: onSortColumn
+                )
 
-                            Button("\(col.name)\(sortArrow)") {
-                                onSortColumn?(col.name)
-                            }
-                            .frame(minWidth: 120, alignment: .leading)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(
-                                Color.adaptive(
-                                    light: Color(white: 0.88),
-                                    dark: Color(white: 0.22)
-                                )
-                            )
-                        }
-                    }
-                }
-
-                // Data rows
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 1) {
                         if source.rowCount == 0 {
@@ -126,6 +106,37 @@ public struct ResultGrid: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+private struct GridHeaderView: View {
+    let columns: [ColumnIndexed]
+    let sort: GridSort?
+    let onSortColumn: ((String) -> Void)?
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 1) {
+                ForEach(columns, id: \.id) { colItem in
+                    let col = colItem.column
+                    let isSorted = sort?.column == col.name
+                    let sortArrow = isSorted ? (sort?.descending == true ? " ↓" : " ↑") : ""
+
+                    Button("\(col.name)\(sortArrow)") {
+                        onSortColumn?(col.name)
+                    }
+                    .frame(minWidth: 120, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        Color.adaptive(
+                            light: Color(white: 0.88),
+                            dark: Color(white: 0.22)
+                        )
+                    )
                 }
             }
         }
