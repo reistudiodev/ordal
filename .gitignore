@@ -11,3 +11,6 @@ swift/lib/*
 
 # Local dev data for the "dev data" and "UI snapshots" launch configs
 /.dev
+
+# Release signing secrets (see .env.example)
+.env

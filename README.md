@@ -24,7 +24,7 @@ A native, cross-platform database client (think DBeaver / Beekeeper Studio).
 │   ├── macos/              SwiftUI app
 │   ├── windows/            placeholder (WinUI later)
 │   └── linux/              placeholder (GTK later)
-├── scripts/                build-core, package-macos, test-integration, seed-1m.sql
+├── scripts/                build-core, package-macos, release-*, clean, test-integration, seed-1m.sql
 ├── docker-compose.test.yml database servers for the integration tests
 └── .vscode/                tasks, debug configs, recommended extensions
 ```
@@ -52,6 +52,22 @@ cd apps/macos && swift run         # or apps/linux, apps\windows
 In VS Code: **Terminal → Run Task → Run app**, or press F5 to debug.
 
 Rust tests: `cargo test`. Swift tests: `cd swift && swift test` (after step 1).
+
+## Release builds
+
+```sh
+./scripts/release-macos.sh          # dist/Ordal-<version>-macos.dmg + .zip (universal)
+./scripts/release-linux.sh          # dist/ordal-<version>-linux-<arch>.tar.gz
+.\scripts\release-windows.ps1       # dist\Ordal-<version>-windows-x64.zip
+```
+
+The version comes from `Cargo.toml` (override with `VERSION=…` or `-Version …`).
+macOS signing and notarization need a Developer ID certificate and an App Store Connect
+API key: copy `.env.example` to `.env` and fill it in. Without it the build is ad-hoc signed.
+
+In GitHub, run **Actions → Release → Run workflow** (manual only). Add the same five names
+from `.env.example` as repository secrets; tick "draft release" to attach the builds to a
+draft GitHub release.
 
 ## Do I need Xcode on the Mac?
 
