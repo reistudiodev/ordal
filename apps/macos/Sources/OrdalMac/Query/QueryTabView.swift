@@ -102,6 +102,10 @@ private struct ResultsPane: View {
                     .background(.yellow.opacity(0.15))
             }
             content
+            if tab.pager != nil || tab.status != .idle {
+                Divider()
+                ResultSummary(tab: tab)
+            }
         }
     }
 
@@ -220,6 +224,62 @@ private struct HistoryDrawer: View {
                     .help("Double-click to put this query in the editor")
                 }
             }
+        }
+    }
+}
+
+/// Rows and execution time for the latest run, under every result: query
+/// tabs and a table tab's Query segment alike.
+private struct ResultSummary: View {
+    let tab: QueryTabModel
+
+    var body: some View {
+        // Ticks only while running, so the elapsed time counts up.
+        TimelineView(.animation(minimumInterval: 0.1, paused: !tab.isRunning)) { _ in
+            HStack(spacing: Space.m) {
+                status
+                Spacer()
+                if let pager = tab.pager {
+                    let _ = pager.version
+                    Label(Self.duration(pager.elapsedMs), systemImage: "stopwatch")
+                        .help(tab.isRunning ? "Running for" : "Execution time (until the last row arrived)")
+                        .monospacedDigit()
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, Space.s)
+            .frame(height: 24)
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch tab.status {
+        case .running:
+            Label("Running…", systemImage: "hourglass")
+        case .failed:
+            Label("Failed", systemImage: "xmark.octagon").foregroundStyle(.red)
+        case .cancelled:
+            Label("Cancelled", systemImage: "stop.circle")
+        case .finished, .idle:
+            if let pager = tab.pager {
+                if pager.columns.isEmpty, let n = pager.rowsAffected {
+                    Label("\(n.formatted()) \(n == 1 ? "row" : "rows") affected", systemImage: "checkmark.circle")
+                } else {
+                    Label("\(pager.rowCount.formatted()) \(pager.rowCount == 1 ? "row" : "rows")\(pager.isTruncated ? " (first \(CursorPager.defaultCap.formatted()))" : "")",
+                          systemImage: "checkmark.circle")
+                }
+            }
+        }
+    }
+
+    /// `850 ms`, `1.24 s`, `2 min 05 s`.
+    static func duration(_ ms: UInt64) -> String {
+        switch ms {
+        case ..<1000: "\(ms) ms"
+        case ..<60_000: String(format: "%.2f s", Double(ms) / 1000)
+        default: "\(ms / 60_000) min \(String(format: "%02d", (ms / 1000) % 60)) s"
         }
     }
 }

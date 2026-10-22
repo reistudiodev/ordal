@@ -77,6 +77,13 @@ struct StatusBar: View {
                 }
                 Text(q.isRunning ? "running" : "\(pager.elapsedMs.formatted()) ms")
             }
+        case .table(let t) where t.segment == .query:
+            // The table's Query segment: same summary as a query tab.
+            if let pager = t.query.pager {
+                let _ = pager.version
+                Text("\(pager.rowCount.formatted()) rows")
+                Text(t.query.isRunning ? "running" : "\(pager.elapsedMs.formatted()) ms")
+            }
         case .table(let t):
             let _ = t.pager.version
             if let count = t.pager.count {

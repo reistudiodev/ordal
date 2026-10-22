@@ -433,6 +433,11 @@ final class OrdalKitTests: XCTestCase {
         let p = try XCTUnwrap(tab.positions["child"])
         XCTAssertEqual(tab.table(at: DiagramPoint(x: p.x + 10, y: p.y + 10)), "child")
         XCTAssertNil(tab.table(at: DiagramPoint(x: 1, y: 1)), "empty canvas")
+        // Rows: header first, then one row per column.
+        let rowY = { (i: Double) in p.y + SchemaLayout.headerHeight + (i + 0.5) * SchemaLayout.rowHeight }
+        XCTAssertNil(tab.column(at: DiagramPoint(x: p.x + 10, y: p.y + 5)), "header")
+        XCTAssertEqual(tab.column(at: DiagramPoint(x: p.x + 10, y: rowY(0)))?.column, "id")
+        XCTAssertEqual(tab.column(at: DiagramPoint(x: p.x + 10, y: rowY(1)))?.column, "parent_id")
 
         // A live drag step moves the card and its edge, without saving.
         let before = tab.edges[0]

@@ -133,10 +133,10 @@ struct SchemaDiagramView: View {
                 guard let name = tab.table(at: DiagramPoint(x: p.x, y: p.y)), let o = tab.positions[name] else { return nil }
                 return (name, CGPoint(x: o.x, y: o.y))
             },
-            passThrough: { p, _, origin in
-                // The header's ⋮ menu belongs to SwiftUI.
+            isMenuButton: { p, _, origin in
                 p.x > origin.x + SchemaLayout.cardWidth - 32 && p.y < origin.y + SchemaLayout.headerHeight
             },
+            menu: { name in cardMenu(name) },
             move: { name, origin, persist in
                 tab.move(name, to: DiagramPoint(x: origin.x, y: origin.y), persist: persist)
             },
@@ -150,8 +150,41 @@ struct SchemaDiagramView: View {
             clickBackground: {
                 tab.selected = nil
                 tab.focusOnly = false
+            },
+            hover: { p in
+                let hit = p.flatMap { tab.column(at: DiagramPoint(x: $0.x, y: $0.y)) }
+                if hit?.table != tab.hovered?.table || hit?.column != tab.hovered?.column { tab.hovered = hit }
             }
         )
+    }
+
+    /// The card's ⋮ menu as a native menu (opened by `DiagramHostingView`).
+    private func cardMenu(_ name: String) -> NSMenu {
+        let kind: NodeKind = workspace.config.kind == .mongoDb ? .collection : .table
+        let table = tab.graph?.tables.first { $0.name == name }
+        let focusing = tab.focusOnly && tab.selected == name
+        return ClosureMenu([
+            ("Open Data", { openTable(name) }),
+            ("New Query", {
+                guard let table else { return }
+                workspace.newQueryTab(text: workspace.starterQuery(path: table.path, kind: kind, detail: nil),
+                                      database: workspace.database(for: table.path))
+            }),
+            ("Copy Name", {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(name, forType: .string)
+            }),
+            nil,
+            (focusing ? "Show All Tables" : "Show Only Related", {
+                if focusing {
+                    tab.focusOnly = false
+                } else {
+                    tab.selected = name
+                    tab.focusOnly = true
+                }
+            }),
+            ("Hide Table", { tab.hide(name) }),
+        ])
     }
 
     private func openTable(_ name: String) {
@@ -199,7 +232,6 @@ private struct DiagramContent: View {
         let tables = tab.visibleTables
         let shown = tables.count > Self.cullAbove ? tables.filter(isNearViewport) : tables
         let foreignKeys = foreignKeysByTable
-        let focus = tab.focusOnly ? tab.selected : nil
         ZStack(alignment: .topLeading) {
             Color(nsColor: DiagramPalette.canvas)
             DotGrid(size: size)
@@ -212,9 +244,7 @@ private struct DiagramContent: View {
                     emphasis: tab.emphasis(ofTable: table.name),
                     hoveredColumn: tab.hovered?.table == table.name ? tab.hovered?.column : nil,
                     foreignKeys: foreignKeys[table.name] ?? [],
-                    references: tab.references(of: table.name),
-                    isFocusingThis: focus == table.name,
-                    actions: actions(for: table)
+                    references: tab.references(of: table.name)
                 )
                 .equatable()
             }
@@ -226,27 +256,6 @@ private struct DiagramContent: View {
         var out: [String: Set<String>] = [:]
         for r in tab.graph?.relations ?? [] { out[r.fromTable, default: []].formUnion(r.fromColumns) }
         return out
-    }
-
-    private func actions(for table: GraphTable) -> CardActions {
-        let kind: NodeKind = workspace.config.kind == .mongoDb ? .collection : .table
-        return CardActions(
-            open: { workspace.openTable(path: table.path, kind: kind) },
-            newQuery: {
-                workspace.newQueryTab(text: workspace.starterQuery(path: table.path, kind: kind, detail: nil),
-                                      database: workspace.database(for: table.path))
-            },
-            toggleFocus: {
-                if tab.focusOnly && tab.selected == table.name {
-                    tab.focusOnly = false
-                } else {
-                    tab.selected = table.name
-                    tab.focusOnly = true
-                }
-            },
-            hide: { tab.hide(table.name) },
-            hover: { column in tab.hovered = column.map { (table.name, $0) } }
-        )
     }
 
     private func isNearViewport(_ t: GraphTable) -> Bool {
@@ -360,5 +369,33 @@ private struct EdgeEnds: Shape {
             path.addRect(CGRect(x: start.x - 1, y: start.y - 5, width: 2, height: 10))
         }
         return path
+    }
+}
+
+/// An `NSMenu` built from titles and closures (`nil` = separator).
+final class ClosureMenu: NSMenu {
+    private var actions: [() -> Void] = []
+
+    init(_ items: [(String, () -> Void)?]) {
+        super.init(title: "")
+        for item in items {
+            guard let (title, action) = item else {
+                addItem(.separator())
+                continue
+            }
+            let menuItem = NSMenuItem(title: title, action: #selector(run(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.tag = actions.count
+            actions.append(action)
+            addItem(menuItem)
+        }
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("not used")
+    }
+
+    @objc private func run(_ item: NSMenuItem) {
+        actions[item.tag]()
     }
 }

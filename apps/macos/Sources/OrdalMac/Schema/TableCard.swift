@@ -11,19 +11,10 @@ enum ColumnGlyph {
     static let notNull = "diamond.fill"
 }
 
-/// What a card's menu and hover do, supplied by the diagram.
-struct CardActions {
-    var open: () -> Void
-    var newQuery: () -> Void
-    var toggleFocus: () -> Void
-    var hide: () -> Void
-    var hover: (_ column: String?) -> Void
-}
-
 /// A table card: header with ⋮ menu, then every column with its flags and type.
 /// It takes plain values and is `Equatable`, so moving one card while
-/// dragging re-renders only that card. Dragging and clicks are handled by
-/// `DiagramHostingView`; hover and the menu stay here.
+/// dragging re-renders only that card. It is purely visual: dragging,
+/// clicks, hover and the ⋮ menu are handled by `DiagramHostingView`.
 struct TableCard: View, Equatable {
     let table: GraphTable
     let position: DiagramPoint
@@ -31,12 +22,10 @@ struct TableCard: View, Equatable {
     let hoveredColumn: String?
     let foreignKeys: Set<String>
     let references: [String]
-    let isFocusingThis: Bool
-    let actions: CardActions
 
     static func == (a: TableCard, b: TableCard) -> Bool {
         a.table == b.table && a.position == b.position && a.emphasis == b.emphasis
-            && a.hoveredColumn == b.hoveredColumn && a.foreignKeys == b.foreignKeys && a.isFocusingThis == b.isFocusingThis
+            && a.hoveredColumn == b.hoveredColumn && a.foreignKeys == b.foreignKeys
     }
 
     var body: some View {
@@ -61,7 +50,6 @@ struct TableCard: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open", actions.open)
     }
 
     private var header: some View {
@@ -75,23 +63,10 @@ struct TableCard: View, Equatable {
                     .foregroundStyle(.secondary)
                     .help("About \(n.formatted()) rows")
             }
-            Menu {
-                Button("Open Data", action: actions.open)
-                Button("New Query", action: actions.newQuery)
-                Button("Copy Name") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(table.name, forType: .string)
-                }
-                Divider()
-                Button(isFocusingThis ? "Show All Tables" : "Show Only Related", action: actions.toggleFocus)
-                Button("Hide Table", action: actions.hide)
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 20)
+            // Drawn here; opened by the canvas (`DiagramHostingView`).
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
             .accessibilityLabel("Actions for \(table.name)")
         }
         .padding(.horizontal, Space.s + 2)
@@ -139,14 +114,6 @@ struct TableCard: View, Equatable {
         .padding(.horizontal, Space.s + 2)
         .frame(height: SchemaLayout.rowHeight)
         .background(hovered ? Color.accentColor.opacity(0.12) : striped ? Color.primary.opacity(0.025) : .clear)
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside {
-                actions.hover(c.name)
-            } else if hovered {
-                actions.hover(nil)
-            }
-        }
     }
 
     private var accessibilityText: String {

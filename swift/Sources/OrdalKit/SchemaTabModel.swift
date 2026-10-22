@@ -89,6 +89,16 @@ public final class SchemaTabModel: Identifiable {
         version += 1
     }
 
+    /// The column row under `point`, if it is over a card's body (not its header).
+    public func column(at point: DiagramPoint) -> (table: String, column: String)? {
+        guard let name = table(at: point), let p = positions[name],
+              let t = graph?.tables.first(where: { $0.name == name }) else { return nil }
+        let y = point.y - p.y - SchemaLayout.headerHeight
+        guard y >= 0 else { return nil }
+        let i = Int(y / SchemaLayout.rowHeight)
+        return i < t.columns.count ? (name, t.columns[i].name) : nil
+    }
+
     /// The topmost visible card containing `point` (later cards draw on top).
     public func table(at point: DiagramPoint) -> String? {
         visibleTables.last { t in

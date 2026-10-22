@@ -1,24 +1,9 @@
 import AppKit
+import OrdalKit
 import SwiftUI
 
-/// The app's light / dark choice. "System" follows macOS.
-enum AppTheme: String, CaseIterable, Identifiable {
-    case system, light, dark
-
-    var id: String { rawValue }
-
-    static let storageKey = "appTheme"
-    /// The relations canvas can differ from the app (e.g. a dark diagram in a light app).
-    static let diagramKey = "diagramTheme"
-
-    var label: String {
-        switch self {
-        case .system: "System"
-        case .light: "Light"
-        case .dark: "Dark"
-        }
-    }
-
+/// macOS mappings for OrdalKit's `AppTheme` (the shared light / dark choice).
+extension AppTheme {
     var symbol: String {
         switch self {
         case .system: "circle.lefthalf.filled"
@@ -43,14 +28,10 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    static var current: AppTheme {
-        AppTheme(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .system
-    }
-
     /// Applies a theme to every window and remembers it.
     @MainActor
     static func set(_ theme: AppTheme) {
-        UserDefaults.standard.set(theme.rawValue, forKey: storageKey)
+        save(theme)
         NSApp.appearance = theme.nsAppearance
     }
 }

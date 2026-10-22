@@ -18,9 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Linux keyring headers
+      - name: Linux dependencies (keyring, GTK 4 / GTK 3)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libgtk-4-dev libgtk-3-dev clang
       # Server engines are skipped here (no ORDAL_TEST_*_URL); SQLite always runs.
       - name: Rust tests
         run: cargo test

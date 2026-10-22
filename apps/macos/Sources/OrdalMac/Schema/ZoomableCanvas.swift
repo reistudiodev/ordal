@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OrdalKit
 import SwiftUI
 
 /// Drives a `ZoomableCanvas`: zoom, fit, scroll-to, export, and the visible
@@ -70,17 +71,22 @@ final class CanvasController {
 struct CanvasInteraction {
     /// The card under a point and its top-left corner, if any.
     var cardAt: (CGPoint) -> (name: String, origin: CGPoint)?
-    /// Points that SwiftUI should handle (the card's ⋮ menu).
-    var passThrough: (CGPoint, _ card: String, _ origin: CGPoint) -> Bool
+    /// Whether a point is on a card's ⋮ button.
+    var isMenuButton: (CGPoint, _ card: String, _ origin: CGPoint) -> Bool
+    /// The ⋮ menu for a card (also shown on right-click).
+    var menu: (_ card: String) -> NSMenu
     var move: (_ card: String, _ origin: CGPoint, _ persist: Bool) -> Void
     var clickCard: (_ card: String, _ clickCount: Int) -> Void
     var clickBackground: () -> Void
+    /// The pointer moved to a point (nil when it left the canvas or a drag began).
+    var hover: (CGPoint?) -> Void
 }
 
-/// Hosts the SwiftUI diagram and handles dragging in AppKit, where
-/// `convert(_:from:)` accounts for the scroll view's magnification exactly.
-/// Dragging a card moves it in the model on every event, so its connectors
-/// follow; dragging empty canvas pans.
+/// Hosts the SwiftUI diagram and handles every pointer interaction in AppKit,
+/// where `convert(_:from:)` accounts for the scroll view's magnification
+/// exactly (SwiftUI's own hover and hit-testing drift when zoomed). Dragging
+/// a card moves it in the model on every event, so its connectors follow;
+/// dragging empty canvas pans; hover and the ⋮ menu are resolved here too.
 final class DiagramHostingView<Content: View>: NSHostingView<Content> {
     var interaction: CanvasInteraction?
 
@@ -92,11 +98,46 @@ final class DiagramHostingView<Content: View>: NSHostingView<Content> {
     /// Screen distance before a press becomes a drag.
     private let threshold: CGFloat = 3
 
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard let interaction else { return super.mouseMoved(with: event) }
+        if drag == nil { interaction.hover(convert(event.locationInWindow, from: nil)) }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let interaction else { return super.mouseExited(with: event) }
+        interaction.hover(nil)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let interaction else { return super.rightMouseDown(with: event) }
+        let p = convert(event.locationInWindow, from: nil)
+        if let (name, _) = interaction.cardAt(p) {
+            interaction.menu(name).popUp(positioning: nil, at: p, in: self)
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard let interaction else { return super.mouseDown(with: event) }
         let p = convert(event.locationInWindow, from: nil)
         if let (name, origin) = interaction.cardAt(p) {
-            if interaction.passThrough(p, name, origin) { return super.mouseDown(with: event) }
+            if interaction.isMenuButton(p, name, origin) {
+                // Open under the ⋮ button, like a pull-down.
+                let anchor = CGPoint(x: origin.x + SchemaLayout.cardWidth - 28, y: origin.y + SchemaLayout.headerHeight)
+                interaction.menu(name).popUp(positioning: nil, at: anchor, in: self)
+                return
+            }
+            interaction.hover(nil)
             drag = .card(name: name, grab: CGSize(width: p.x - origin.x, height: p.y - origin.y),
                          startWindow: event.locationInWindow, moved: false)
         } else if let clip = enclosingScrollView?.contentView {

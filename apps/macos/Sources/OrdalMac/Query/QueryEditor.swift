@@ -65,8 +65,8 @@ struct QueryEditor: NSViewRepresentable {
             if parent.selection != range { parent.selection = range }
         }
 
-        private static let keyword = NSColor.adaptive(light: 0xA626A4, dark: 0xC678DD)
-        private static let string = NSColor.adaptive(light: 0x1E7A3A, dark: 0x98C379)
+        private static let keyword = NSColor.adaptive(SyntaxPalette.keyword)
+        private static let string = NSColor.adaptive(SyntaxPalette.string)
         private static let number = DataColors.number
 
         private static let sqlKeywords = try! NSRegularExpression(

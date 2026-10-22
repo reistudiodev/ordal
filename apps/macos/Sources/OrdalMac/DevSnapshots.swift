@@ -125,12 +125,28 @@ enum DevSnapshots {
             pager.discardEdits()
         } else {
             note("events_1m not found; load scripts/seed-1m.sql")
+            // Still check a table tab's Query segment shows rows and time.
+            if let tables = ws.browser.node(at: [pg.database, "public", "Tables"]),
+               let first = tables.children?.first(where: { $0.name == "profiles" }) ?? tables.children?.first {
+                ws.openTable(first)
+                while ws.activeTable?.pager.page == nil { await settle(0.05) }
+                if let t = ws.activeTable {
+                    t.segment = .query
+                    await t.query.run()
+                    await settle(0.6)
+                    note("table query: \(t.query.status), \(t.query.pager?.rowCount ?? 0) rows in \(t.query.pager?.elapsedMs ?? 0) ms")
+                    capture("table-query-timing", in: dir)
+                    t.segment = .data
+                }
+            }
         }
 
         // Relations of the public schema.
         ws.openSchema(path: [pg.database, "public"])
         if case .schema(let schema)? = ws.selectedTab {
             while schema.graph == nil && schema.error == nil { await settle(0.05) }
+            // Start from the automatic layout so runs are repeatable.
+            schema.resetLayout()
             note("relations: \(schema.graph?.tables.count ?? 0) tables, \(schema.graph?.relations.count ?? 0) relations \(schema.error ?? "")")
             await settle(1.0)
             capture("relations", in: dir)
@@ -139,6 +155,9 @@ enum DevSnapshots {
                     await checkDrag(schema, scroll: scroll, zoom: zoom, note: note)
                 }
                 await checkPan(schema, scroll: scroll, note: note)
+                for zoom in [0.62, 1.5] {
+                    await checkHover(schema, scroll: scroll, zoom: zoom, note: note)
+                }
                 scroll.magnification = 0.3
                 await settle(0.8)
                 capture("relations-zoomed-out", in: dir)
@@ -296,11 +315,15 @@ enum DevSnapshots {
             doc.displayIfNeeded()
             times.append((CACurrentMediaTime() - t) * 1000)
         }
-        doc.mouseUp(with: event(.leftMouseUp, CGPoint(x: from.x + 200, y: from.y - 100)))
+        let release = CGPoint(x: from.x + 200, y: from.y - 100)
+        doc.mouseUp(with: event(.leftMouseUp, release))
         await settle(0.3)
         let end = tab.positions[name]!
         let (dx, dy) = (end.x - start.x, end.y - start.y)
-        let expected = (200 / scroll.magnification, 100 / scroll.magnification)
+        // The card must end where the pointer is, in canvas coordinates (this
+        // also holds when dragging near an edge scrolls the canvas).
+        let pointer = doc.convert(release, from: nil)
+        let expected = (pointer.x - grab.x, pointer.y - grab.y)
         let onCursor = abs(dx - expected.0) < 1.5 && abs(dy - expected.1) < 1.5
         // Every connector touching the card must end on its new edge.
         let table = tab.graph!.tables.first { $0.name == name }!
@@ -314,6 +337,31 @@ enum DevSnapshots {
         note(String(format: "drag %@ at %.0f%%: moved %.1f,%.1f (expected %.1f,%.1f) %@; edges attached: %@; step p50 %.1f ms, max %.1f ms",
                     name, zoom * 100, dx, dy, expected.0, expected.1, onCursor ? "OK" : "WRONG", attached ? "yes" : "NO",
                     sorted[sorted.count / 2], sorted.last!))
+    }
+
+    /// Moves the pointer over rows with real mouse-moved events and checks the
+    /// highlighted row is the one under the pointer.
+    private static func checkHover(_ tab: SchemaTabModel, scroll: NSScrollView, zoom: Double, note: (String) -> Void) async {
+        guard let doc = scroll.documentView, let window = doc.window,
+              let table = tab.visibleTables.max(by: { $0.columns.count < $1.columns.count }),
+              let p = tab.positions[table.name] else { return }
+        scroll.magnification = zoom
+        scroll.contentView.scroll(to: CGPoint(x: max(0, p.x - 50), y: max(0, p.y - 50)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await settle(0.4)
+        var wrong: [String] = []
+        for (i, column) in table.columns.enumerated() {
+            let point = CGPoint(x: p.x + 60, y: p.y + SchemaLayout.headerHeight + (Double(i) + 0.5) * SchemaLayout.rowHeight)
+            let event = NSEvent.mouseEvent(with: .mouseMoved, location: doc.convert(point, to: nil), modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                           context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+            doc.mouseMoved(with: event)
+            if tab.hovered?.table != table.name || tab.hovered?.column != column.name {
+                wrong.append("\(column.name)→\(tab.hovered?.column ?? "nil")")
+            }
+        }
+        note("hover at \(Int(zoom * 100))%: \(table.columns.count) rows of \(table.name), \(wrong.isEmpty ? "all exact" : "WRONG: \(wrong.joined(separator: ", "))")")
+        tab.hovered = nil
     }
 
     /// Drags empty canvas and checks the view panned by the same distance.
