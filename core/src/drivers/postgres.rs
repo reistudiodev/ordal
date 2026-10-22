@@ -445,11 +445,19 @@ impl Driver for PgDriver {
             [] => return Err(CoreError::invalid("choose a database or schema")),
         };
         let pool = self.pools.get(Some(db)).await?;
-        let cols: Vec<(String, String, String, bool, bool, i64)> = sqlx::query_as(
-            "SELECT c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
-               COALESCE(a.attnum = ANY(pk.indkey), false), c.reltuples::int8 \
+        type Col = (String, String, String, bool, bool, bool, bool, i64);
+        let cols: Vec<Col> = sqlx::query_as(
+            "SELECT c.relname::text, a.attname::text, \
+               CASE WHEN t.typcategory = 'A' THEN substr(t.typname, 2) || '[]' ELSE t.typname END::text, \
+               NOT a.attnotnull, COALESCE(a.attnum = ANY(pk.indkey), false), \
+               (a.attidentity <> '' OR COALESCE(pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval(%', false)), \
+               EXISTS (SELECT 1 FROM pg_index u WHERE u.indrelid = c.oid AND u.indisunique AND NOT u.indisprimary \
+                       AND u.indnatts = 1 AND u.indkey[0] = a.attnum), \
+               c.reltuples::int8 \
              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
              JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+             JOIN pg_type t ON t.oid = a.atttypid \
+             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
              LEFT JOIN pg_index pk ON pk.indrelid = c.oid AND pk.indisprimary \
              WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') ORDER BY c.relname, a.attnum",
         )
@@ -474,7 +482,7 @@ impl Driver for PgDriver {
         .await?;
 
         let mut tables: Vec<GraphTable> = Vec::new();
-        for (table, column, type_name, nullable, is_key, est) in cols {
+        for (table, column, type_name, nullable, is_key, is_identity, is_unique, est) in cols {
             if tables.last().is_none_or(|t| t.name != table) {
                 tables.push(GraphTable {
                     path: vec![db.into(), schema.into(), FOLDER_TABLES.into(), table.clone()],
@@ -483,7 +491,7 @@ impl Driver for PgDriver {
                     estimated_rows: (est >= 0).then_some(est as u64),
                 });
             }
-            tables.last_mut().unwrap().columns.push(GraphColumn { name: column, type_name, is_key, nullable });
+            tables.last_mut().unwrap().columns.push(GraphColumn { name: column, type_name, is_key, is_identity, is_unique, nullable });
         }
         let qualify = |ns: &str, rel: &str| if ns == schema { rel.to_string() } else { format!("{ns}.{rel}") };
         let mut relations = Vec::new();
@@ -495,7 +503,7 @@ impl Driver for PgDriver {
                     tables.push(GraphTable {
                         path: vec![db.into(), ns.clone(), FOLDER_TABLES.into(), rel.clone()],
                         name: q,
-                        columns: cols.iter().map(|c| GraphColumn { name: c.clone(), type_name: String::new(), is_key: false, nullable: true }).collect(),
+                        columns: cols.iter().map(|c| GraphColumn::stub(c.clone(), false)).collect(),
                         estimated_rows: None,
                     });
                 }

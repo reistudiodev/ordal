@@ -356,6 +356,79 @@ final class DBClientKitTests: XCTestCase {
         XCTAssertLessThan(x("authors"), x("books"))
         XCTAssertLessThan(x("books"), x("reviews"))
         XCTAssertNotNil(tab.positions["items"], "unrelated tables are placed too")
+        let authors = try XCTUnwrap(tab.graph?.tables.first { $0.name == "authors" })
+        XCTAssertTrue(authors.columns[0].isKey && authors.columns[0].isIdentity, "INTEGER PRIMARY KEY is the rowid")
+
+        // Focus: the selected table's edges are highlighted, the rest dimmed.
+        tab.selected = "authors"
+        XCTAssertEqual(tab.focusSet, ["authors", "books"])
+        let edges = tab.edges
+        XCTAssertEqual(edges.count, 2)
+        XCTAssertEqual(edges.filter { tab.emphasis(of: $0) == .highlighted }.map(\.toTable), ["authors"])
+        tab.focusOnly = true
+        XCTAssertEqual(Set(tab.visibleTables.map(\.name)), ["authors", "books"])
+        XCTAssertEqual(tab.find("rvw"), nil, "reviews is hidden by focus")
+        tab.focusOnly = false
+        XCTAssertEqual(tab.find("rvw"), "reviews")
+    }
+
+    // MARK: Diagram layout (pure)
+
+    private func table(_ name: String, _ columns: [String]) -> GraphTable {
+        GraphTable(name: name, path: [name],
+                   columns: columns.map { GraphColumn(name: $0, typeName: "int4", isKey: $0 == "id", isIdentity: false, isUnique: false, nullable: $0 != "id") },
+                   estimatedRows: nil)
+    }
+
+    private func rel(_ from: String, _ fc: [String], _ to: String, _ tc: [String]) -> Relation {
+        Relation(name: "\(from)_\(fc.joined())", fromTable: from, fromColumns: fc, toTable: to, toColumns: tc, inferred: false)
+    }
+
+    func testLayoutReducesCrossings() {
+        // Two parents, two children wired so that alphabetical order crosses.
+        let graph = SchemaGraph(
+            tables: [table("a_parent", ["id"]), table("b_parent", ["id"]), table("a_child", ["id", "p"]), table("b_child", ["id", "p"])],
+            relations: [rel("a_child", ["p"], "b_parent", ["id"]), rel("b_child", ["p"], "a_parent", ["id"])]
+        )
+        let level = SchemaLayout.layers(graph)
+        XCTAssertEqual(level["a_parent"], 0)
+        XCTAssertEqual(level["a_child"], 1)
+        let alphabetical = [["a_parent", "b_parent"], ["a_child", "b_child"]]
+        XCTAssertEqual(SchemaLayout.crossings(graph, order: alphabetical), 1)
+        XCTAssertEqual(SchemaLayout.crossings(graph, order: SchemaLayout.orderLayers(graph, level: level)), 0)
+    }
+
+    func testRoutesAreOrthogonalAndUseSeparateLanes() {
+        let graph = SchemaGraph(
+            tables: [table("parent", ["id", "code"]), table("child", ["id", "parent_id", "parent_code"]), table("other", ["id", "parent_id"])],
+            relations: [
+                rel("child", ["parent_id", "parent_code"], "parent", ["id", "code"]),
+                rel("other", ["parent_id"], "parent", ["id"]),
+            ]
+        )
+        let positions = SchemaLayout.layout(graph)
+        let edges = SchemaLayout.route(graph, positions: positions)
+        XCTAssertEqual(edges.count, 3, "a composite key draws one edge per column pair")
+        for e in edges {
+            for (p, q) in zip(e.points, e.points.dropFirst()) {
+                XCTAssertTrue(p.x == q.x || p.y == q.y, "\(e.id) has a diagonal segment")
+            }
+            let from = graph.tables.first { $0.name == e.fromTable }!
+            let to = graph.tables.first { $0.name == e.toTable }!
+            XCTAssertEqual(e.points.first!.y, SchemaLayout.rowY(from, column: e.fromColumn, top: positions[from.name]!.y))
+            XCTAssertEqual(e.points.last!.y, SchemaLayout.rowY(to, column: e.toColumn, top: positions[to.name]!.y))
+        }
+        let lanes = edges.filter { $0.points.count == 4 }.map { $0.points[1].x }
+        XCTAssertEqual(Set(lanes).count, lanes.count, "parallel edges get their own lanes")
+    }
+
+    func testDiagramPositionsPersist() {
+        let defaults = UserDefaults(suiteName: "dbclient.tests.\(UUID().uuidString)")!
+        DiagramLayoutStore.save(["t": DiagramPoint(x: 10, y: 20)], connection: "c1", path: ["db", "public"], defaults: defaults)
+        XCTAssertEqual(DiagramLayoutStore.load(connection: "c1", path: ["db", "public"], defaults: defaults)["t"], DiagramPoint(x: 10, y: 20))
+        XCTAssertTrue(DiagramLayoutStore.load(connection: "c2", path: ["db", "public"], defaults: defaults).isEmpty)
+        DiagramLayoutStore.clear(connection: "c1", path: ["db", "public"], defaults: defaults)
+        XCTAssertTrue(DiagramLayoutStore.load(connection: "c1", path: ["db", "public"], defaults: defaults).isEmpty)
     }
 
     func testReconnectKeepsTabs() async throws {

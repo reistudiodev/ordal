@@ -98,7 +98,8 @@ async fn table_paging_sorting_editing_and_relations() {
          WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1000) \
          INSERT INTO dbclient_it SELECT x, CASE WHEN x % 10 = 0 THEN NULL ELSE 'n' || substr('0' || (x % 37), -2) END FROM c; \
          CREATE TABLE dbclient_parent (id INTEGER PRIMARY KEY); \
-         CREATE TABLE dbclient_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES dbclient_parent);",
+         CREATE TABLE dbclient_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES dbclient_parent); \
+         CREATE TABLE dbclient_flags (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, note TEXT);",
     )
     .await;
     let path: Vec<String> = ["main", "Tables", "dbclient_it"].map(String::from).into();

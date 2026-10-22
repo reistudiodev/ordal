@@ -1988,16 +1988,38 @@ public func FfiConverterTypeConnectionConfig_lower(_ value: ConnectionConfig) ->
 
 public struct GraphColumn: Equatable, Hashable {
     public var name: String
+    /**
+     * Short type name, e.g. `int4`, `timestamptz`, `varchar(20)`, `objectId`.
+     */
     public var typeName: String
     public var isKey: Bool
+    /**
+     * Values come from the database: identity, serial, auto_increment, rowid alias.
+     */
+    public var isIdentity: Bool
+    /**
+     * A single-column unique constraint or index (primary keys excluded).
+     */
+    public var isUnique: Bool
     public var nullable: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, typeName: String, isKey: Bool, nullable: Bool) {
+    public init(name: String, 
+        /**
+         * Short type name, e.g. `int4`, `timestamptz`, `varchar(20)`, `objectId`.
+         */typeName: String, isKey: Bool, 
+        /**
+         * Values come from the database: identity, serial, auto_increment, rowid alias.
+         */isIdentity: Bool, 
+        /**
+         * A single-column unique constraint or index (primary keys excluded).
+         */isUnique: Bool, nullable: Bool) {
         self.name = name
         self.typeName = typeName
         self.isKey = isKey
+        self.isIdentity = isIdentity
+        self.isUnique = isUnique
         self.nullable = nullable
     }
 
@@ -2020,6 +2042,8 @@ public struct FfiConverterTypeGraphColumn: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 typeName: FfiConverterString.read(from: &buf), 
                 isKey: FfiConverterBool.read(from: &buf), 
+                isIdentity: FfiConverterBool.read(from: &buf), 
+                isUnique: FfiConverterBool.read(from: &buf), 
                 nullable: FfiConverterBool.read(from: &buf)
         )
     }
@@ -2028,6 +2052,8 @@ public struct FfiConverterTypeGraphColumn: FfiConverterRustBuffer {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.typeName, into: &buf)
         FfiConverterBool.write(value.isKey, into: &buf)
+        FfiConverterBool.write(value.isIdentity, into: &buf)
+        FfiConverterBool.write(value.isUnique, into: &buf)
         FfiConverterBool.write(value.nullable, into: &buf)
     }
 }

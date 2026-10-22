@@ -28,6 +28,7 @@ struct DBClientMacApp: App {
         // this is a regular app that gets a Dock icon and a focused window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.appearance = AppTheme.current.nsAppearance
     }
 
     var body: some Scene {
@@ -37,11 +38,16 @@ struct DBClientMacApp: App {
         }
         .defaultSize(width: 1320, height: 840)
         .commands { AppCommands(app: app) }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
 struct AppCommands: Commands {
     let app: AppState
+    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system.rawValue
 
     private var workspace: WorkspaceModel? { app.activeWorkspace }
     private var query: QueryTabModel? { workspace?.activeEditor }
@@ -83,6 +89,10 @@ struct AppCommands: Commands {
                 .disabled(query == nil || workspace?.config.kind.isSQL != true)
         }
         CommandGroup(after: .sidebar) {
+            Picker("Appearance", selection: Binding(get: { theme }, set: { theme = $0; AppTheme.set(AppTheme(rawValue: $0) ?? .system) })) {
+                ForEach(AppTheme.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            Divider()
             Button("Command Palette…") { app.showPalette.toggle() }
                 .keyboardShortcut("k")
             Button(app.showInspector ? "Hide Inspector" : "Show Inspector") { app.showInspector.toggle() }

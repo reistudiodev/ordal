@@ -566,12 +566,31 @@ impl Driver for MongoDriver {
         for name in &names {
             let coll = db.collection::<Document>(name);
             let docs = collect_docs(coll.find(doc! {}).limit(50).await?).await?;
+            // Single-field unique indexes mark unique fields.
+            let unique: Vec<String> = match coll.list_indexes().await {
+                Ok(cursor) => cursor
+                    .filter_map(|i| async move {
+                        let i = i.ok()?;
+                        let is_unique = i.options.as_ref().and_then(|o| o.unique).unwrap_or(false);
+                        (is_unique && i.keys.len() == 1).then(|| i.keys.keys().next().cloned()).flatten()
+                    })
+                    .collect()
+                    .await,
+                Err(_) => Vec::new(),
+            };
             tables.push(GraphTable {
                 name: name.clone(),
                 path: vec![db_name.clone(), name.clone()],
                 columns: flatten_columns(&docs)
                     .into_iter()
-                    .map(|c| GraphColumn { is_key: c.name == "_id", nullable: c.name != "_id", name: c.name, type_name: c.type_name })
+                    .map(|c| GraphColumn {
+                        is_key: c.name == "_id",
+                        is_identity: false,
+                        is_unique: unique.contains(&c.name),
+                        nullable: c.name != "_id",
+                        name: c.name,
+                        type_name: c.type_name,
+                    })
                     .collect(),
                 estimated_rows: coll.estimated_document_count().await.ok(),
             });

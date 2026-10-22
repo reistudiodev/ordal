@@ -50,7 +50,8 @@ async fn suite(engine: &str, expect_name: &str) {
     exec(
         s,
         &format!(
-            "DROP TABLE IF EXISTS dbclient_child, dbclient_parent, dbclient_it; \
+            "DROP TABLE IF EXISTS dbclient_child, dbclient_parent, dbclient_it, dbclient_flags; \
+             CREATE TABLE dbclient_flags (id INT AUTO_INCREMENT PRIMARY KEY, code VARCHAR(20) UNIQUE NOT NULL, note TEXT); \
              CREATE TABLE dbclient_it (id INT PRIMARY KEY, name VARCHAR(20) NULL) COLLATE utf8mb4_bin; \
              INSERT INTO dbclient_it SELECT x, IF(x % 10 = 0, NULL, CONCAT('n', LPAD(x % 37, 2, '0'))) \
                FROM (SELECT a.n + b.n * 10 + c.n * 100 + 1 AS x FROM {digits} a, {digits} b, {digits} c) t; \
@@ -70,7 +71,7 @@ async fn suite(engine: &str, expect_name: &str) {
     common::sql_table_suite(s, path, vec![db.clone()]).await;
 
     assert_cancels(s, "SELECT SLEEP(30)").await;
-    exec(s, "DROP TABLE dbclient_child, dbclient_parent, dbclient_it").await;
+    exec(s, "DROP TABLE dbclient_child, dbclient_parent, dbclient_it, dbclient_flags").await;
 }
 
 #[tokio::test]

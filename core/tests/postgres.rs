@@ -50,7 +50,8 @@ async fn postgres_suite() {
     // Browse.
     exec(
         s,
-        "DROP TABLE IF EXISTS public.dbclient_child, public.dbclient_parent, public.dbclient_it; \
+        "DROP TABLE IF EXISTS public.dbclient_child, public.dbclient_parent, public.dbclient_it, public.dbclient_flags; \
+         CREATE TABLE public.dbclient_flags (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, code text UNIQUE NOT NULL, note text); \
          CREATE TABLE public.dbclient_it (id int PRIMARY KEY, name varchar(20)); \
          INSERT INTO public.dbclient_it SELECT g, CASE WHEN g % 10 = 0 THEN NULL ELSE 'n' || lpad((g % 37)::text, 2, '0') END \
            FROM generate_series(1, 1000) g; \
@@ -87,7 +88,7 @@ async fn postgres_suite() {
 
     // Cancel (server-side via pg_cancel_backend).
     assert_cancels(s, "SELECT pg_sleep(30)").await;
-    exec(s, "DROP TABLE public.dbclient_child, public.dbclient_parent, public.dbclient_it, public.dbclient_loose").await;
+    exec(s, "DROP TABLE public.dbclient_child, public.dbclient_parent, public.dbclient_it, public.dbclient_loose, public.dbclient_flags").await;
 }
 
 /// Phase 1 gate: random access into a 1M-row table stays fast enough to

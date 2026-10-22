@@ -77,11 +77,15 @@ async fn mongodb_suite() {
     // Inferred relations: orders.userId holds ids from users.
     let _ = run(s, r#"{"drop": "users"}"#, 10).await;
     let _ = run(s, r#"{"drop": "orders"}"#, 10).await;
-    exec(s, r#"{"insert": "users", "documents": [{"_id": {"$oid": "65f000000000000000000001"}, "name": "ann"}]}"#).await;
+    exec(s, r#"{"insert": "users", "documents": [{"_id": {"$oid": "65f000000000000000000001"}, "name": "ann", "email": "ann@example.com"}]}"#).await;
+    exec(s, r#"{"createIndexes": "users", "indexes": [{"key": {"email": 1}, "name": "email_1", "unique": true}]}"#).await;
     exec(s, r#"{"insert": "orders", "documents": [{"total": 5, "userId": {"$oid": "65f000000000000000000001"}}]}"#).await;
     let graph = s.schema_graph(vec![db.clone()]).await.unwrap();
     let rel = graph.relations.iter().find(|r| r.from_table == "orders").expect("orders → users");
     assert_eq!((rel.to_table.as_str(), rel.from_columns[0].as_str(), rel.inferred), ("users", "userId", true));
+    let users = graph.tables.iter().find(|t| t.name == "users").unwrap();
+    assert!(users.columns.iter().any(|c| c.name == "email" && c.is_unique));
+    assert!(users.columns.iter().any(|c| c.name == "_id" && c.is_key));
     exec(s, r#"{"drop": "users"}"#).await;
     exec(s, r#"{"drop": "orders"}"#).await;
 

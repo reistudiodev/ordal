@@ -225,4 +225,12 @@ pub async fn sql_table_suite(s: &Session, path: Vec<String>, graph_path: Vec<Str
     assert_eq!(rel.from_columns, vec!["parent_id".to_string()]);
     assert_eq!(rel.to_columns, vec!["id".to_string()]);
     assert!(!rel.inferred);
+
+    // Column flags on `dbclient_flags (id identity PK, code unique not null, note nullable)`.
+    let flags = graph.tables.iter().find(|t| t.name.ends_with("dbclient_flags")).expect("dbclient_flags in the graph");
+    let col = |n: &str| flags.columns.iter().find(|c| c.name == n).unwrap();
+    let (id, code, note) = (col("id"), col("code"), col("note"));
+    assert!(id.is_key && id.is_identity && !id.nullable, "{id:?}");
+    assert!(code.is_unique && !code.nullable && !code.is_key, "{code:?}");
+    assert!(note.nullable && !note.is_unique && !note.is_identity, "{note:?}");
 }

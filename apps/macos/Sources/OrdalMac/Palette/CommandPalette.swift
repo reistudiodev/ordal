@@ -86,6 +86,9 @@ enum PaletteCommands {
         var list: [PaletteCommand] = [
             PaletteCommand(id: "new-connection", title: "New Connection…", shortcut: "⌘N") { app.newConnection() },
             PaletteCommand(id: "welcome", title: "Show Welcome") { app.showWelcome = true },
+            PaletteCommand(id: "theme-light", title: "Appearance: Light") { AppTheme.set(.light) },
+            PaletteCommand(id: "theme-dark", title: "Appearance: Dark") { AppTheme.set(.dark) },
+            PaletteCommand(id: "theme-system", title: "Appearance: System") { AppTheme.set(.system) },
             PaletteCommand(id: "inspector", title: app.showInspector ? "Hide Inspector" : "Show Inspector", shortcut: "⌥⌘I") {
                 app.showInspector.toggle()
             },

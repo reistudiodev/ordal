@@ -92,9 +92,21 @@ pub struct CellEdit {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct GraphColumn {
     pub name: String,
+    /// Short type name, e.g. `int4`, `timestamptz`, `varchar(20)`, `objectId`.
     pub type_name: String,
     pub is_key: bool,
+    /// Values come from the database: identity, serial, auto_increment, rowid alias.
+    pub is_identity: bool,
+    /// A single-column unique constraint or index (primary keys excluded).
+    pub is_unique: bool,
     pub nullable: bool,
+}
+
+impl GraphColumn {
+    /// A column known only from a foreign key on a table outside the graph.
+    pub(crate) fn stub(name: String, is_key: bool) -> Self {
+        Self { name, type_name: String::new(), is_key, is_identity: false, is_unique: false, nullable: !is_key }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

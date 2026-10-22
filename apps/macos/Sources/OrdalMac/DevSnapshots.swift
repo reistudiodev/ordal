@@ -128,9 +128,50 @@ enum DevSnapshots {
         if case .schema(let schema)? = ws.selectedTab {
             while schema.graph == nil && schema.error == nil { await settle(0.05) }
             note("relations: \(schema.graph?.tables.count ?? 0) tables, \(schema.graph?.relations.count ?? 0) relations \(schema.error ?? "")")
-            schema.selected = schema.graph?.relations.first?.fromTable
-            await settle()
+            await settle(1.0)
             capture("relations", in: dir)
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            await settle()
+            capture("relations-dark", in: dir)
+            NSApp.appearance = NSAppearance(named: .aqua)
+            schema.selected = "profiles"
+            await settle()
+            capture("relations-focused", in: dir)
+            schema.focusOnly = true
+            await settle()
+            capture("relations-focus-only", in: dir)
+            schema.focusOnly = false
+            schema.selected = nil
+            await settle(1.0)
+            if let root = mainWindow?.contentView, let scroll = findScroll(root) {
+                // The whole canvas as the Export PNG button renders it.
+                if let doc = scroll.documentView, let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                    doc.cacheDisplay(in: doc.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("relations-export.png"))
+                }
+                // Dark appearance with a focused table, captured the same way.
+                NSApp.appearance = NSAppearance(named: .darkAqua)
+                schema.selected = "profiles"
+                await settle(1.0)
+                if let doc = scroll.documentView, let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                    doc.cacheDisplay(in: doc.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("relations-export-dark-focused.png"))
+                }
+                NSApp.appearance = NSAppearance(named: .aqua)
+                schema.selected = nil
+                // Diagram override: dark canvas inside the light app.
+                UserDefaults.standard.set(AppTheme.dark.rawValue, forKey: AppTheme.diagramKey)
+                await settle(1.0)
+                capture("relations-dark-override-window", in: dir)
+                if let doc = scroll.documentView, let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) {
+                    doc.cacheDisplay(in: doc.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("relations-dark-override.png"))
+                }
+                note("canvas appearance with override: \(scroll.effectiveAppearance.name.rawValue), app: \(NSApp.effectiveAppearance.name.rawValue)")
+                UserDefaults.standard.removeObject(forKey: AppTheme.diagramKey)
+                await settle(0.5)
+                note("diagram zoom \(Int(scroll.magnification * 100))%, canvas \(Int(scroll.documentView?.bounds.width ?? 0))x\(Int(scroll.documentView?.bounds.height ?? 0))")
+            }
         }
 
         // A query tab with results.
@@ -210,6 +251,12 @@ enum DevSnapshots {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.visibleRect) else { return }
         view.cacheDisplay(in: view.visibleRect, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+    }
+
+    private static func findScroll(_ view: NSView) -> NSScrollView? {
+        if let s = view as? NSScrollView, s.allowsMagnification { return s }
+        for sub in view.subviews { if let s = findScroll(sub) { return s } }
+        return nil
     }
 
     private static func findTable(_ view: NSView) -> NSTableView? {

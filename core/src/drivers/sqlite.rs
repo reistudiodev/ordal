@@ -406,6 +406,16 @@ impl Driver for SqliteDriver {
                     .bind(db)
                     .fetch_all(&self.pool)
                     .await?;
+            let unique: Vec<String> = sqlx::query_scalar(
+                "SELECT ii.name FROM pragma_index_list(?1, ?2) il, pragma_index_info(il.name, ?2) ii \
+                 WHERE il.\"unique\" = 1 AND il.origin <> 'pk' \
+                   AND (SELECT count(*) FROM pragma_index_info(il.name, ?2)) = 1",
+            )
+            .bind(name)
+            .bind(db)
+            .fetch_all(&self.pool)
+            .await?;
+            let pk_count = cols.iter().filter(|c| c.3 > 0).count();
             let fks: Vec<(i64, String, String, Option<String>)> =
                 sqlx::query_as("SELECT id, \"table\", \"from\", \"to\" FROM pragma_foreign_key_list(?1, ?2) ORDER BY id, seq")
                     .bind(name)
@@ -435,7 +445,15 @@ impl Driver for SqliteDriver {
                 path: vec![db.into(), FOLDER_TABLES.into(), name.clone()],
                 columns: cols
                     .into_iter()
-                    .map(|(n, ty, not_null, pk)| GraphColumn { name: n, type_name: ty.to_lowercase(), is_key: pk > 0, nullable: !not_null })
+                    .map(|(n, ty, not_null, pk)| GraphColumn {
+                        // A lone INTEGER PRIMARY KEY is the rowid: the database assigns it.
+                        is_identity: pk > 0 && pk_count == 1 && ty.eq_ignore_ascii_case("integer"),
+                        is_unique: unique.contains(&n),
+                        type_name: ty.to_lowercase(),
+                        is_key: pk > 0,
+                        nullable: !not_null && pk == 0,
+                        name: n,
+                    })
                     .collect(),
                 estimated_rows: None,
             });

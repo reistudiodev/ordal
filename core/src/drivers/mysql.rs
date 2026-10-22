@@ -452,7 +452,7 @@ impl Driver for MySqlDriver {
         let db = path.first().ok_or_else(|| CoreError::invalid("choose a database"))?;
         let cols = self
             .catalog(
-                "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY, t.TABLE_ROWS \
+                "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY, t.TABLE_ROWS, c.EXTRA \
                  FROM information_schema.COLUMNS c JOIN information_schema.TABLES t \
                    ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME \
                  WHERE c.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE' \
@@ -484,6 +484,8 @@ impl Driver for MySqlDriver {
                 type_name: r[2].clone(),
                 nullable: r[3] == "YES",
                 is_key: r[4] == "PRI",
+                is_identity: r[6].to_lowercase().contains("auto_increment"),
+                is_unique: r[4] == "UNI",
             });
         }
         let mut relations: Vec<Relation> = Vec::new();
@@ -493,7 +495,7 @@ impl Driver for MySqlDriver {
                 tables.push(GraphTable {
                     path: vec![r[3].clone(), FOLDER_TABLES.into(), r[4].clone()],
                     name: to_table.clone(),
-                    columns: vec![GraphColumn { name: r[5].clone(), type_name: String::new(), is_key: true, nullable: false }],
+                    columns: vec![GraphColumn::stub(r[5].clone(), true)],
                     estimated_rows: None,
                 });
             }
