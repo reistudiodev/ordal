@@ -88,12 +88,12 @@ impl PgDriver {
         let (db, schema, table) = table_path(path, true)?;
         let schema = schema.unwrap_or("public");
         let pool = self.pools.get(Some(db)).await?;
-        let relkind: String = sqlx::query_scalar("SELECT relkind::text FROM pg_class WHERE oid = format('%I.%I', $1, $2)::regclass")
+        type Col = (String, String, String, String, bool, bool, Vec<String>, bool, bool);
+        let relkind_fut = sqlx::query_scalar::<_, String>("SELECT relkind::text FROM pg_class WHERE oid = format('%I.%I', $1, $2)::regclass")
             .bind(schema)
             .bind(table)
-            .fetch_one(&pool)
-            .await?;
-        let pk: Vec<String> = sqlx::query_scalar(
+            .fetch_one(&pool);
+        let pk_fut = sqlx::query_scalar::<_, String>(
             "SELECT a.attname::text FROM pg_index i \
              JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
              WHERE i.indrelid = format('%I.%I', $1, $2)::regclass AND i.indisprimary \
@@ -101,10 +101,8 @@ impl PgDriver {
         )
         .bind(schema)
         .bind(table)
-        .fetch_all(&pool)
-        .await?;
-        type Col = (String, String, String, String, bool, bool, Vec<String>, bool, bool);
-        let cols: Vec<Col> = sqlx::query_as(
+        .fetch_all(&pool);
+        let cols_fut = sqlx::query_as::<_, Col>(
             "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), format_type(a.atttypid, NULL), \
                upper(t.typname)::text, NOT a.attnotnull, a.atthasdef, \
                COALESCE((SELECT array_agg(e.enumlabel::text ORDER BY e.enumsortorder) FROM pg_enum e \
@@ -117,8 +115,8 @@ impl PgDriver {
         )
         .bind(schema)
         .bind(table)
-        .fetch_all(&pool)
-        .await?;
+        .fetch_all(&pool);
+        let (relkind, pk, cols) = tokio::try_join!(relkind_fut, pk_fut, cols_fut)?;
 
         let is_table = matches!(relkind.as_str(), "r" | "p");
         let read_only_reason = if self.read_only {

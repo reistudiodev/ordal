@@ -3,7 +3,7 @@ import OrdalCore
 import OrdalKit
 import SwiftCrossUI
 
-/// Native cross-platform main database workspace layout.
+/// Modern native cross-platform database workspace layout.
 public struct WorkspaceView: View {
     let container: AppStateContainer
     let workspace: WorkspaceModel
@@ -37,24 +37,25 @@ public struct WorkspaceView: View {
 
             WorkspaceStatusBar(workspace: workspace)
         }
+        .background(Color.uiBackground)
     }
 
     private var sidebarArea: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Schema Browser")
+                Text("SCHEMA BROWSER")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.adaptive(light: Color(white: 0.92), dark: Color(white: 0.16)))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.uiSidebar)
 
             ObjectBrowser(container: container, workspace: workspace)
         }
-        .frame(minWidth: 220, maxWidth: 280)
-        .background(Color.adaptive(light: Color(white: 0.96), dark: Color(white: 0.14)))
+        .frame(minWidth: 230, maxWidth: 290)
+        .background(Color.uiSidebar)
     }
 
     private var centerWorkArea: some View {
@@ -63,6 +64,7 @@ public struct WorkspaceView: View {
             tabContentArea
         }
         .frame(minWidth: 400)
+        .background(Color.uiBackground)
     }
 
     @ViewBuilder
@@ -82,18 +84,31 @@ public struct WorkspaceView: View {
     }
 
     private var emptyTabPlaceholder: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Spacer()
+            ModernIcon(.table, color: Color.uiTextMuted, size: 36, strokeWidth: 1.2)
             Text("No open tabs")
                 .font(.title2)
-                .foregroundColor(Color(white: 0.5))
-            Text("Select a table from the sidebar or open a new query.")
+                .foregroundColor(Color.uiTextPrimary)
+            Text("Select a table or view from the sidebar, or open a new query.")
                 .font(.body)
-                .foregroundColor(Color(white: 0.4))
-            Button("New Query Tab (Ctrl+T)") {
+                .foregroundColor(Color.uiTextMuted)
+            Button {
                 workspace.newQueryTab()
                 container.notifyUpdate()
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(.plus, color: Color.uiAccent, size: 12)
+                    Text("New Query Tab (Ctrl+T)")
+                        .font(.body)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
             Spacer()
         }
     }
@@ -106,72 +121,156 @@ private struct WorkspaceTopBar: View {
     private var app: AppState { container.app }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Circle()
                 .foregroundColor(Color.from(pair: workspace.config.accentColors))
-                .frame(width: 10, height: 10)
+                .frame(width: 8, height: 8)
 
             Text(workspace.config.name)
                 .font(.headline)
+                .foregroundColor(Color.uiTextPrimary)
 
             if workspace.config.environment.showsChrome {
                 Text(workspace.config.environment.label)
                     .font(.caption)
                     .foregroundColor(Color.from(pair: workspace.config.environment.colors))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.uiHover)
+                    .cornerRadius(4)
             }
 
             if workspace.config.readOnly {
                 Text("(read-only)")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
             }
 
             Text("·")
-                .foregroundColor(Color(white: 0.4))
+                .foregroundColor(Color.uiTextFaint)
 
             Text(workspace.config.address)
                 .font(.caption)
-                .foregroundColor(Color(white: 0.5))
+                .foregroundColor(Color.uiTextMuted)
 
             Spacer()
 
-            Button("🔍 Command (Ctrl+K)") {
+            // Command Palette (Ctrl+K)
+            Button {
                 app.showPalette = true
                 container.notifyUpdate()
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(.search, color: Color.uiTextMuted, size: 12)
+                    Text("Command (Ctrl+K)")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
 
-            Button(app.showInspector ? "Hide Inspector" : "Inspector") {
+            // Inspector Toggle
+            Button {
                 app.showInspector.toggle()
                 container.notifyUpdate()
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(
+                        .inspector,
+                        color: app.showInspector ? Color.uiAccent : Color.uiTextMuted,
+                        size: 12
+                    )
+                    Text(app.showInspector ? "Hide Inspector" : "Inspector")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
 
-            Button("➕ New Query") {
+            // New Query
+            Button {
                 workspace.newQueryTab()
                 container.notifyUpdate()
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(.plus, color: Color.uiAccent, size: 12)
+                    Text("New Query")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
 
-            Button("🔄 Reconnect") {
+            // Reconnect
+            Button {
                 Task {
                     await workspace.reconnect()
                     container.notifyUpdate()
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(.refresh, color: Color.uiTextMuted, size: 12)
+                    Text("Reconnect")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
 
-            Button("🏠 Connections") {
+            // Connections (Home)
+            Button {
                 app.showWelcome = true
                 container.notifyUpdate()
+            } label: {
+                HStack(spacing: 6) {
+                    ModernIcon(.home, color: Color.uiTextMuted, size: 12)
+                    Text("Connections")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
 
-            Button("Disconnect") {
+            // Disconnect
+            Button {
                 Task {
                     await app.disconnect(workspace.id)
                     container.notifyUpdate()
                 }
+            } label: {
+                Text("Disconnect")
+                    .font(.caption)
+                    .foregroundColor(Color.uiDanger)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.uiPanel)
+                    .cornerRadius(6)
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.adaptive(light: Color(white: 0.93), dark: Color(white: 0.18)))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color.uiSidebar)
     }
 }
 
@@ -180,46 +279,78 @@ private struct WorkspaceTabBar: View {
     let workspace: WorkspaceModel
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ScrollView(.horizontal) {
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     ForEach(workspace.tabs) { tab in
                         let isSelected = tab.id == workspace.selectedTabID
                         HStack(spacing: 6) {
-                            Button(tab.title) {
+                            Button {
                                 workspace.selectedTabID = tab.id
                                 container.notifyUpdate()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    ModernIcon(
+                                        iconForTab(tab),
+                                        color: isSelected ? Color.uiAccent : Color.uiTextMuted,
+                                        size: 12
+                                    )
+                                    Text(tab.title)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(
+                                            isSelected
+                                                ? Color.uiTextPrimary
+                                                : Color.uiTextMuted
+                                        )
+                                }
                             }
-                            .foregroundColor(isSelected ? Color.hex(0x007ACC) : Color(white: 0.6))
+                            .buttonStyle(.plain)
 
-                            Button("✕") {
+                            Button {
                                 workspace.closeTab(tab.id)
                                 container.notifyUpdate()
+                            } label: {
+                                ModernIcon(.close, color: Color.uiTextFaint, size: 9, strokeWidth: 1.6)
+                                    .frame(width: 14, height: 14)
                             }
-                            .font(.caption)
-                            .foregroundColor(Color(white: 0.4))
+                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 5)
                         .background(
                             isSelected
-                                ? Color.adaptive(light: Color(white: 1.0), dark: Color(white: 0.22))
-                                : Color.adaptive(light: Color(white: 0.91), dark: Color(white: 0.16))
+                                ? Color.uiBackground
+                                : Color.uiSidebar
                         )
-                        .cornerRadius(4)
+                        .cornerRadius(6)
                     }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             }
 
-            Button("＋") {
+            Button {
                 workspace.newQueryTab()
                 container.notifyUpdate()
+            } label: {
+                ModernIcon(.plus, color: Color.uiTextMuted, size: 12)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
             }
-            .padding(.horizontal, 8)
+            .buttonStyle(.plain)
         }
-        .background(Color.adaptive(light: Color(white: 0.89), dark: Color(white: 0.14)))
+        .background(Color.uiSidebar)
+    }
+
+    private func iconForTab(_ tab: WorkspaceModel.Tab) -> IconType {
+        switch tab {
+        case .query:
+            return .play
+        case .table:
+            return .table
+        case .schema:
+            return .schema
+        }
     }
 }
 
@@ -231,43 +362,46 @@ private struct WorkspaceStatusBar: View {
             HStack(spacing: 6) {
                 let statusColor: Color = {
                     switch workspace.state {
-                    case .connected: Color.hex(0x28A745)
-                    case .reconnecting: Color.hex(0xFFC107)
-                    case .lost: Color.hex(0xDC3545)
+                    case .connected: Color.uiSuccess
+                    case .reconnecting: Color.uiWarning
+                    case .lost: Color.uiDanger
                     }
                 }()
                 Circle()
                     .foregroundColor(statusColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
 
                 Text(statusText)
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.6))
+                    .foregroundColor(Color.uiTextPrimary)
             }
 
             if let server = workspace.serverInfo {
                 Text("\(server.engine) \(server.version)")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
             }
 
             if let ms = workspace.latencyMs {
                 Text("\(Int(ms.rounded())) ms")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextFaint)
             }
 
             Spacer()
 
             if let editor = workspace.activeEditor, editor.isRunning {
-                Text("Executing query...")
-                    .font(.caption)
-                    .foregroundColor(Color.hex(0x007ACC))
+                HStack(spacing: 6) {
+                    ModernIcon(.refresh, color: Color.uiAccent, size: 11)
+                    Text("Executing query...")
+                        .font(.caption)
+                        .foregroundColor(Color.uiAccent)
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.17)))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(Color.uiSidebar)
     }
 
     private var statusText: String {

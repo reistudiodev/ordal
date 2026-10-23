@@ -263,8 +263,9 @@ public final class TablePager: GridDataSource {
         } catch {
             self.error = describe(error)
         }
-        await load(.first, number: 1)
-        await refreshCount(exact: false)
+        async let loadTask: () = load(.first, number: 1)
+        async let countTask: () = refreshCount(exact: false)
+        _ = await (loadTask, countTask)
     }
 
     /// Keyset paging is used whenever the page carries keys.

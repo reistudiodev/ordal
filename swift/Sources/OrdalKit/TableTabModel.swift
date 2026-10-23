@@ -49,7 +49,6 @@ public final class TableTabModel: Identifiable {
 
     public func start() async {
         await pager.start()
-        await loadStructure()
     }
 
     func rebind(_ session: Session) {

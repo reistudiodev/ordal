@@ -45,14 +45,13 @@ public struct CommandPaletteDialog: View {
             footerHint
         }
         .frame(minWidth: 520, maxWidth: 640)
-        .background(Color.adaptive(light: Color(white: 1.0), dark: Color(white: 0.18)))
+        .background(Color.uiPanel)
         .cornerRadius(8)
     }
 
     private var searchHeader: some View {
         HStack(spacing: 8) {
-            Text("🔍")
-                .font(.body)
+            ModernIcon(.search, color: Color.uiTextMuted, size: 14)
 
             TextField(
                 "Search command, table, or connection...",
@@ -65,12 +64,15 @@ public struct CommandPaletteDialog: View {
                 )
             )
 
-            Button("✕") {
+            Button {
                 onDismiss()
+            } label: {
+                ModernIcon(.close, color: Color.uiTextMuted, size: 11)
             }
+            .buttonStyle(.plain)
         }
         .padding(12)
-        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.2)))
+        .background(Color.uiSidebar)
     }
 
     private var resultsList: some View {
@@ -82,7 +84,7 @@ public struct CommandPaletteDialog: View {
                         Spacer()
                         Text("No matching commands found")
                             .font(.body)
-                            .foregroundColor(Color(white: 0.5))
+                            .foregroundColor(Color.uiTextMuted)
                             .padding(24)
                         Spacer()
                     }
@@ -104,14 +106,23 @@ public struct CommandPaletteDialog: View {
         HStack {
             Text("Tip: Click any item or use search to quickly jump to tables or run actions.")
                 .font(.caption)
-                .foregroundColor(Color(white: 0.5))
+                .foregroundColor(Color.uiTextMuted)
             Spacer()
-            Button("Close") {
+            Button {
                 onDismiss()
+            } label: {
+                Text("Close")
+                    .font(.caption)
+                    .foregroundColor(Color.uiTextPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.uiPanel)
+                    .cornerRadius(4)
             }
+            .buttonStyle(.plain)
         }
         .padding(10)
-        .background(Color.adaptive(light: Color(white: 0.96), dark: Color(white: 0.16)))
+        .background(Color.uiSidebar)
     }
 }
 
@@ -120,30 +131,37 @@ private struct CommandRowView: View {
     let onSelect: () -> Void
 
     var body: some View {
-        Button {
-            onSelect()
-        } label: {
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
+            Button {
+                onSelect()
+            } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(command.title)
                         .font(.body)
+                        .foregroundColor(Color.uiTextPrimary)
                     if let sub = command.subtitle {
                         Text(sub)
                             .font(.caption)
-                            .foregroundColor(Color(white: 0.5))
+                            .foregroundColor(Color.uiTextMuted)
                     }
                 }
-
-                Spacer()
-
-                if let shortcut = command.shortcut {
-                    Text(shortcut)
-                        .font(.caption)
-                        .foregroundColor(Color.hex(0x007ACC))
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            if let shortcut = command.shortcut {
+                Text(shortcut)
+                    .font(.caption)
+                    .foregroundColor(Color.uiAccent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.uiHover)
+                    .cornerRadius(3)
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 }
+

@@ -69,18 +69,39 @@ public struct SchemaDiagramTabView: View {
                 container.notifyUpdate()
             }
 
-            Button("Tidy Up") {
+            Button {
                 tab.resetLayout()
                 container.notifyUpdate()
+            } label: {
+                Text("Tidy Up")
+                    .font(.caption)
+                    .foregroundColor(Color.uiTextPrimary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Color.uiPanel)
+                    .cornerRadius(4)
             }
+            .buttonStyle(.plain)
 
-            Button("🔄 Reload") {
+            Button {
                 loadSchema()
+            } label: {
+                HStack(spacing: 5) {
+                    ModernIcon(.refresh, color: Color.uiTextMuted, size: 11)
+                    Text("Reload")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.18)))
+        .padding(.vertical, 6)
+        .background(Color.uiSidebar)
     }
 
     @ViewBuilder
@@ -183,8 +204,8 @@ private struct RelationRowView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(white: 0.5))
 
-            Text("➔")
-                .foregroundColor(Color(white: 0.4))
+            ModernIcon(.chevronRight, size: 10)
+                .foregroundColor(Color(white: 0.5))
 
             Text(rel.toTable)
                 .font(.headline)
@@ -246,12 +267,17 @@ private struct TableCardView: View {
             ForEach(table.columns, id: \.name) { col in
                 let isFk = schemaTab.isForeignKey(table: table.name, column: col.name)
                 HStack(spacing: 6) {
-                    Text(col.isKey ? "🔑" : (isFk ? "🔗" : "  "))
-                        .font(.caption)
+                    if col.isKey {
+                        ModernIcon(.key, color: Color.uiWarning, size: 10)
+                    } else if isFk {
+                        ModernIcon(.column, color: Color.uiAccent, size: 10)
+                    } else {
+                        Spacer().frame(width: 10)
+                    }
 
                     Text(col.name)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(col.isKey ? Color.hex(0x007ACC) : Color(white: 0.85))
+                        .foregroundColor(col.isKey ? Color.uiAccent : Color.uiTextPrimary)
 
                     Spacer()
 

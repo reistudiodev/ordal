@@ -3,7 +3,7 @@ import OrdalCore
 import OrdalKit
 import SwiftCrossUI
 
-/// Native cross-platform Welcome View displaying saved connection cards and quick connect actions.
+/// Modern native cross-platform Welcome View displaying saved connection cards and quick connect actions.
 public struct WelcomeView: View {
     let container: AppStateContainer
     @State private var url: String = ""
@@ -34,14 +34,19 @@ public struct WelcomeView: View {
             }
         }
         .padding(16)
+        .background(Color.uiBackground)
     }
 
     private var welcomeHeader: some View {
         VStack(spacing: 8) {
-            Text("Ordal")
-                .font(.largeTitle)
+            HStack(spacing: 10) {
+                ModernIcon(.database, color: Color.uiAccent, size: 28, strokeWidth: 1.6)
+                Text("Ordal")
+                    .font(.largeTitle)
+                    .foregroundColor(Color.uiTextPrimary)
+            }
             Text("PostgreSQL · MySQL · MariaDB · SQLite · MongoDB · Redis")
-                .foregroundColor(Color(white: 0.5))
+                .foregroundColor(Color.uiTextMuted)
                 .font(.subheadline)
         }
         .padding(.top, 24)
@@ -51,21 +56,21 @@ public struct WelcomeView: View {
         VStack(spacing: 12) {
             Text("No saved connections yet")
                 .font(.title2)
-                .foregroundColor(Color(white: 0.5))
+                .foregroundColor(Color.uiTextPrimary)
             Text("Paste a URL above, or click New Connection to configure your database.")
-                .foregroundColor(Color(white: 0.4))
+                .foregroundColor(Color.uiTextMuted)
         }
         .frame(maxHeight: .infinity)
     }
 
     private var connectionsList: some View {
         ScrollView(.vertical) {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 ForEach(app.connections, id: \.id) { config in
                     ConnectionCard(container: container, config: config)
                 }
             }
-            .padding(24)
+            .padding(20)
         }
     }
 }
@@ -78,9 +83,22 @@ private struct FastConnectBar: View {
         HStack(spacing: 12) {
             TextField("Paste a connection URL (e.g. postgres://user:pass@localhost/db)", text: url)
                 .frame(minWidth: 420)
-            Button("New Connection") {
+
+            Button {
                 onSubmit()
+            } label: {
+                HStack(spacing: 5) {
+                    ModernIcon(.plus, color: Color.white, size: 12)
+                    Text("New Connection")
+                        .font(.body)
+                        .foregroundColor(Color.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.uiAccent)
+                .cornerRadius(6)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
     }
@@ -96,7 +114,7 @@ public struct ConnectionCard: View {
         HStack(spacing: 16) {
             Circle()
                 .foregroundColor(Color.from(pair: config.accentColors))
-                .frame(width: 12, height: 12)
+                .frame(width: 10, height: 10)
 
             connectionDetails
 
@@ -104,13 +122,8 @@ public struct ConnectionCard: View {
 
             connectActionButtons
         }
-        .padding(16)
-        .background(
-            Color.adaptive(
-                light: Color(white: 0.94),
-                dark: Color(white: 0.16)
-            )
-        )
+        .padding(14)
+        .background(Color.uiPanel)
         .cornerRadius(8)
     }
 
@@ -119,26 +132,31 @@ public struct ConnectionCard: View {
             HStack(spacing: 8) {
                 Text(config.name)
                     .font(.headline)
+                    .foregroundColor(Color.uiTextPrimary)
                 if config.environment.showsChrome {
                     Text(config.environment.label)
                         .font(.caption)
                         .foregroundColor(Color.from(pair: config.environment.colors))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.uiHover)
+                        .cornerRadius(4)
                 }
                 if config.readOnly {
                     Text("read-only")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.5))
+                        .foregroundColor(Color.uiTextMuted)
                 }
             }
             HStack(spacing: 6) {
                 Text(config.kind.label)
                     .font(.subheadline)
-                    .foregroundColor(Color(white: 0.6))
+                    .foregroundColor(Color.uiAccent)
                 Text("·")
-                    .foregroundColor(Color(white: 0.4))
+                    .foregroundColor(Color.uiTextFaint)
                 Text(config.address)
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
             }
         }
     }
@@ -146,28 +164,61 @@ public struct ConnectionCard: View {
     @ViewBuilder
     private var connectActionButtons: some View {
         if app.connectingID == config.id {
-            Text("Connecting...")
-                .foregroundColor(Color(white: 0.6))
-                .font(.caption)
+            HStack(spacing: 5) {
+                ModernIcon(.refresh, color: Color.uiAccent, size: 11)
+                Text("Connecting...")
+                    .foregroundColor(Color.uiAccent)
+                    .font(.caption)
+            }
         } else {
-            Button(app.isOpen(config.id) ? "Switch" : "Connect") {
+            Button {
                 Task {
                     await app.connect(config.id)
                     container.notifyUpdate()
                 }
+            } label: {
+                Text(app.isOpen(config.id) ? "Switch" : "Connect")
+                    .font(.caption)
+                    .foregroundColor(Color.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.uiAccent)
+                    .cornerRadius(5)
             }
+            .buttonStyle(.plain)
         }
 
-        Button("Edit") {
+        Button {
             app.edit(config)
             container.notifyUpdate()
+        } label: {
+            HStack(spacing: 4) {
+                ModernIcon(.edit, color: Color.uiTextMuted, size: 10)
+                Text("Edit")
+                    .font(.caption)
+                    .foregroundColor(Color.uiTextPrimary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.uiHover)
+            .cornerRadius(5)
         }
+        .buttonStyle(.plain)
 
-        Button("Delete") {
+        Button {
             Task {
                 await app.delete(config.id)
                 container.notifyUpdate()
             }
+        } label: {
+            Text("Delete")
+                .font(.caption)
+                .foregroundColor(Color.uiDanger)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.uiHover)
+                .cornerRadius(5)
         }
+        .buttonStyle(.plain)
     }
 }

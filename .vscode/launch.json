@@ -2,6 +2,31 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug OrdalPreview",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/shared",
+      "program": "${workspaceFolder}/apps/shared/.build/debug/OrdalPreview",
+      "preLaunchTask": "Build OrdalPreview"
+    },
+    {
+      "name": "Debug OrdalPreview (dev data)",
+      "type": "swift",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/shared",
+      "program": "${workspaceFolder}/apps/shared/.build/debug/OrdalPreview",
+      "env": { "ORDAL_HOME": "${workspaceFolder}/.dev/home" },
+      "preLaunchTask": "Build OrdalPreview"
+    },
+    {
+      "name": "Debug OrdalPreview (LLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/shared",
+      "program": "${workspaceFolder}/apps/shared/.build/debug/OrdalPreview",
+      "preLaunchTask": "Build OrdalPreview"
+    },
+    {
       "name": "Debug macOS app",
       "type": "swift",
       "request": "launch",

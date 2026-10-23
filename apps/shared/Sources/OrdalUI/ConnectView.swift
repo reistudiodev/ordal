@@ -173,10 +173,28 @@ private struct ConnectFormFieldsView: View {
 
             // Read-only Flag
             HStack(spacing: 8) {
-                Button(form.readOnly ? "☑ Read-only connection" : "☐ Read-only connection") {
+                Button {
                     form.readOnly.toggle()
                     container.notifyUpdate()
+                } label: {
+                    HStack(spacing: 6) {
+                        if form.readOnly {
+                            ModernIcon(.checkmark, color: Color.uiAccent, size: 11, strokeWidth: 2)
+                        } else {
+                            Circle()
+                                .stroke(Color.uiTextMuted, style: StrokeStyle(width: 1.2))
+                                .frame(width: 10, height: 10)
+                        }
+                        Text("Read-only connection")
+                            .font(.caption)
+                            .foregroundColor(Color.uiTextPrimary)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.uiPanel)
+                    .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
             }
         }
     }

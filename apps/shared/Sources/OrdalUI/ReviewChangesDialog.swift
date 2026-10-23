@@ -82,22 +82,25 @@ public struct ReviewChangesDialog: View {
 
     private var headerView: some View {
         HStack(spacing: 8) {
-            Text(isProd ? "⚠️" : "📝")
-                .font(.title2)
+            ModernIcon(isProd ? .warning : .edit, color: isProd ? Color.uiDanger : Color.uiWarning, size: 20)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Review \(pager.staged.count) Pending Change(s)")
                     .font(.headline)
+                    .foregroundColor(Color.uiTextPrimary)
                 Text("\(pager.path.last ?? "") · \(config.name)\(isProd ? " · Production" : "")")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
             }
 
             Spacer()
 
-            Button("✕") {
+            Button {
                 onDismiss()
+            } label: {
+                ModernIcon(.close, color: Color.uiTextMuted, size: 11)
             }
+            .buttonStyle(.plain)
         }
         .padding(.bottom, 4)
     }
@@ -155,9 +158,12 @@ public struct ReviewChangesDialog: View {
 
     private var productionGuardView: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("⚠️ Production Safeguard: Type **\(expectedName)** to confirm:")
-                .font(.caption)
-                .foregroundColor(Color.hex(0xDC3545))
+            HStack(spacing: 6) {
+                ModernIcon(.warning, color: Color.uiDanger, size: 12)
+                Text("Production Safeguard: Type **\(expectedName)** to confirm:")
+                    .font(.caption)
+                    .foregroundColor(Color.uiDanger)
+            }
 
             TextField(
                 "Database or connection name",

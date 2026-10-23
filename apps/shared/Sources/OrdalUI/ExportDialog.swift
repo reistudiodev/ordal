@@ -3,17 +3,17 @@ import OrdalCore
 import OrdalKit
 import SwiftCrossUI
 
-/// Native cross-platform export modal dialog for Linux, Windows, and macOS.
+/// Modern native cross-platform export dialog (SQL dump, CSV, JSON, BSON/Mongo).
 public struct ExportDialog: View {
     let container: AppStateContainer
     let workspace: WorkspaceModel
     let target: ExportTarget
-    let onDismiss: @MainActor @Sendable () -> Void
+    let onDismiss: () -> Void
 
     @State private var content: ExportContent = .both
     @State private var format: ExportFormat = .sql
     @State private var limit: ExportLimit = .all
-    @State private var isProcessing = false
+    @State private var isProcessing: Bool = false
     @State private var progressMessage: String = ""
     @State private var statusMessage: String = ""
     @State private var exportPreview: String = ""
@@ -22,7 +22,7 @@ public struct ExportDialog: View {
         container: AppStateContainer,
         workspace: WorkspaceModel,
         target: ExportTarget,
-        onDismiss: @escaping @MainActor @Sendable () -> Void
+        onDismiss: @escaping () -> Void
     ) {
         self.container = container
         self.workspace = workspace
@@ -39,20 +39,26 @@ public struct ExportDialog: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Header
-            HStack(spacing: 8) {
-                Text(headerIcon)
-                    .font(.title2)
+            HStack(spacing: 10) {
+                ModernIcon(iconType(for: target.kind), color: iconColor(for: target.kind), size: 20)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Export \(target.name)")
                         .font(.title3)
+                        .foregroundColor(Color.uiTextPrimary)
                     Text("\(engine.label) · \(target.displayTitle)")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.6))
+                        .foregroundColor(Color.uiTextMuted)
                 }
+
                 Spacer()
-                Button("✕") {
+
+                Button {
                     onDismiss()
+                } label: {
+                    ModernIcon(.close, color: Color.uiTextMuted, size: 11)
                 }
+                .buttonStyle(.plain)
             }
 
             Divider()
@@ -61,134 +67,195 @@ public struct ExportDialog: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("What to Export:")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.7))
+                    .foregroundColor(Color.uiTextMuted)
 
                 HStack(spacing: 6) {
                     ForEach(ExportContent.allCases) { mode in
                         let isSelected = content == mode
-                        Button(mode.rawValue) {
+                        Button {
                             content = mode
-                            container.notifyUpdate()
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.caption)
+                                .foregroundColor(isSelected ? Color.white : Color.uiTextPrimary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(isSelected ? Color.uiAccent : Color.uiPanel)
+                                .cornerRadius(5)
                         }
-                        .foregroundColor(isSelected ? Color.hex(0x007ACC) : Color(white: 0.7))
+                        .buttonStyle(.plain)
                     }
                 }
-
-                Text(content.description)
-                    .font(.caption)
-                    .foregroundColor(Color(white: 0.5))
             }
 
             // Format Selector
             VStack(alignment: .leading, spacing: 6) {
-                Text("File Format:")
+                Text("Export Format:")
                     .font(.caption)
-                    .foregroundColor(Color(white: 0.7))
+                    .foregroundColor(Color.uiTextMuted)
 
                 HStack(spacing: 6) {
-                    ForEach(availableFormats) { f in
-                        let isSelected = format == f
-                        Button(f.rawValue) {
-                            format = f
-                            container.notifyUpdate()
+                    ForEach(availableFormats) { fmt in
+                        let isSelected = format == fmt
+                        Button {
+                            format = fmt
+                        } label: {
+                            Text(fmt.rawValue)
+                                .font(.caption)
+                                .foregroundColor(isSelected ? Color.white : Color.uiTextPrimary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(isSelected ? Color.uiAccent : Color.uiPanel)
+                                .cornerRadius(5)
                         }
-                        .foregroundColor(isSelected ? Color.hex(0x007ACC) : Color(white: 0.7))
+                        .buttonStyle(.plain)
                     }
                 }
             }
 
-            // Limit Selector
-            if content != .structureOnly {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Record Limit:")
+            // Row limit for tables
+            if !target.isContainer && content != .structureOnly {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Row Limit:")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.7))
+                        .foregroundColor(Color.uiTextMuted)
 
                     HStack(spacing: 6) {
-                        ForEach(ExportLimit.allCases) { l in
-                            let isSelected = limit == l
-                            Button(l.rawValue) {
-                                limit = l
-                                container.notifyUpdate()
+                        ForEach(ExportLimit.allCases) { lim in
+                            let isSelected = limit == lim
+                            Button {
+                                limit = lim
+                            } label: {
+                                Text(lim.rawValue)
+                                    .font(.caption)
+                                    .foregroundColor(isSelected ? Color.white : Color.uiTextPrimary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(isSelected ? Color.uiAccent : Color.uiPanel)
+                                    .cornerRadius(4)
                             }
-                            .foregroundColor(isSelected ? Color.hex(0x007ACC) : Color(white: 0.7))
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
 
-            // Status / Preview area
+            // Status / Progress
             if isProcessing {
                 HStack(spacing: 8) {
-                    Text("⏳")
-                    Text(progressMessage.isEmpty ? "Generating export..." : progressMessage)
+                    ModernIcon(.refresh, color: Color.uiAccent, size: 12)
+                    Text(progressMessage)
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.6))
+                        .foregroundColor(Color.uiAccent)
                 }
                 .padding(.vertical, 4)
             } else if !statusMessage.isEmpty {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundColor(Color.hex(0x28A745))
-                    .padding(.vertical, 4)
+                HStack(spacing: 6) {
+                    ModernIcon(.checkmark, color: Color.uiSuccess, size: 12)
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundColor(Color.uiSuccess)
+                }
+                .padding(.vertical, 4)
             }
 
+            // Preview pane if generated
             if !exportPreview.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Preview (first 1,000 characters):")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.5))
+                        .foregroundColor(Color.uiTextMuted)
 
-                    ScrollView(.vertical) {
+                    ScrollView([.horizontal, .vertical]) {
                         Text(exportPreview)
                             .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color.uiTextPrimary)
                             .padding(8)
                     }
                     .frame(maxHeight: 120)
-                    .background(
-                        Color.adaptive(
-                            light: Color(white: 0.92),
-                            dark: Color(white: 0.12)
-                        )
-                    )
-                    .cornerRadius(6)
+                    .background(Color.uiSidebar)
+                    .cornerRadius(4)
                 }
             }
 
             Divider()
 
-            // Footer Actions
+            // Actions
             HStack {
-                Button("Cancel") {
+                Button {
                     onDismiss()
+                } label: {
+                    Text("Close")
+                        .font(.body)
+                        .foregroundColor(Color.uiTextPrimary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.uiPanel)
+                        .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
 
-                Button("Export to File") {
-                    Task {
-                        await runExport(writeToFile: true)
-                    }
-                }
-
-                Button("Generate Preview") {
+                Button {
                     Task {
                         await runExport(writeToFile: false)
                     }
+                } label: {
+                    Text("Generate Preview")
+                        .font(.body)
+                        .foregroundColor(Color.uiTextPrimary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.uiPanel)
+                        .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
+                .disabled(isProcessing)
+
+                Button {
+                    Task {
+                        await runExport(writeToFile: true)
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        ModernIcon(.export, color: Color.white, size: 12)
+                        Text("Export to File")
+                            .font(.body)
+                            .foregroundColor(Color.white)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(Color.uiAccent)
+                    .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+                .disabled(isProcessing)
             }
         }
         .padding(20)
         .frame(minWidth: 480)
+        .background(Color.uiBackground)
+        .cornerRadius(8)
     }
 
-    private var headerIcon: String {
-        switch target.kind {
-        case .table: "📄"
-        case .view: "👁️"
-        case .collection: "📚"
-        case .database: "🗄️"
-        case .schema: "📁"
+    private func iconType(for kind: ExportTarget.Kind) -> IconType {
+        switch kind {
+        case .table: .table
+        case .view: .view
+        case .collection: .table
+        case .database: .database
+        case .schema: .schema
+        }
+    }
+
+    private func iconColor(for kind: ExportTarget.Kind) -> Color {
+        switch kind {
+        case .table: Color.nodeTable
+        case .view: Color.nodeView
+        case .collection: Color.nodeTable
+        case .database: Color.nodeDatabase
+        case .schema: Color.nodeFolder
         }
     }
 
@@ -223,10 +290,10 @@ public struct ExportDialog: View {
                     ?? FileManager.default.temporaryDirectory
                 let targetURL = downloadsURL.appendingPathComponent(filename)
 
-                try output.write(to: targetURL, atomically: true, encoding: .utf8)
-                statusMessage = "✓ Saved to \(targetURL.path)"
+                try output.write(to: targetURL, atomically: true, encoding: String.Encoding.utf8)
+                statusMessage = "Saved to \(targetURL.path)"
             } else {
-                statusMessage = "✓ Export generated successfully (\(output.count) bytes)"
+                statusMessage = "Export generated successfully (\(output.count) bytes)"
             }
 
             container.notifyUpdate()

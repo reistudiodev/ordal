@@ -6,7 +6,7 @@ import SwiftCrossUI
 import AppKit
 #endif
 
-/// Native cross-platform Table Tab View with Data, Structure, and DDL inspection.
+/// Modern native cross-platform Table Tab View with Data, Structure, Indexes, and DDL inspection.
 public struct TableTabView: View {
     let container: AppStateContainer
     let tab: TableTabModel
@@ -34,16 +34,17 @@ public struct TableTabView: View {
     }
 
     private var segmentHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             ForEach(tab.segments, id: \.id) { seg in
                 let isSelected = tab.segment == seg
                 let label: String = {
                     if seg == .indexes && !tab.indexes.isEmpty {
-                        return isSelected ? "● Indexes (\(tab.indexes.count))" : "Indexes (\(tab.indexes.count))"
+                        return "Indexes (\(tab.indexes.count))"
                     }
-                    return isSelected ? "● \(seg.rawValue)" : seg.rawValue
+                    return seg.rawValue
                 }()
-                Button(label) {
+
+                Button {
                     tab.segment = seg
                     if seg == .structure || seg == .indexes || seg == .ddl {
                         Task {
@@ -53,19 +54,54 @@ public struct TableTabView: View {
                     } else {
                         container.notifyUpdate()
                     }
+                } label: {
+                    HStack(spacing: 5) {
+                        if isSelected {
+                            Circle()
+                                .foregroundColor(Color.uiAccent)
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(label)
+                            .font(.system(size: 12))
+                            .foregroundColor(
+                                isSelected
+                                    ? Color.uiTextPrimary
+                                    : Color.uiTextMuted
+                            )
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        isSelected
+                            ? Color.uiHover
+                            : Color.clear
+                    )
+                    .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
             }
 
             Spacer()
 
             if !tab.pager.staged.isEmpty {
-                Button("Review Changes (\(tab.pager.staged.count))") {
+                Button {
                     showReviewDialog = true
+                } label: {
+                    HStack(spacing: 5) {
+                        ModernIcon(.warning, color: Color.uiWarning, size: 12)
+                        Text("Review Changes (\(tab.pager.staged.count))")
+                            .font(.caption)
+                            .foregroundColor(Color.uiWarning)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.uiHover)
+                    .cornerRadius(5)
                 }
-                .foregroundColor(Color.hex(0x856404))
+                .buttonStyle(.plain)
             }
 
-            Button(isRefreshing || tab.pager.isLoading ? "⏳ Refreshing…" : "🔄 Refresh") {
+            Button {
                 Task {
                     isRefreshing = true
                     container.notifyUpdate()
@@ -77,12 +113,24 @@ public struct TableTabView: View {
                     async let structTask: () = tab.loadStructure()
                     _ = await (refreshTask, structTask)
                 }
+            } label: {
+                HStack(spacing: 5) {
+                    ModernIcon(.refresh, color: Color.uiTextMuted, size: 12)
+                    Text(isRefreshing || tab.pager.isLoading ? "Refreshing…" : "Refresh")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.uiPanel)
+                .cornerRadius(5)
             }
+            .buttonStyle(.plain)
             .disabled(isRefreshing || tab.pager.isLoading)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.adaptive(light: Color(white: 0.95), dark: Color(white: 0.18)))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.uiSidebar)
     }
 
     @ViewBuilder
@@ -130,6 +178,7 @@ public struct TableTabView: View {
 }
 
 private struct TableDataView: View {
+    @Environment(\.chooseFileSaveDestination) var chooseFileSaveDestination
     let container: AppStateContainer
     let tab: TableTabModel
     let workspace: WorkspaceModel
@@ -137,6 +186,7 @@ private struct TableDataView: View {
     let onShowReview: () -> Void
 
     @State private var docMode: DocumentViewMode = .documents
+    @State private var exportStatus: String = ""
 
     private var pager: TablePager { tab.pager }
 
@@ -154,16 +204,28 @@ private struct TableDataView: View {
                 HStack {
                     Text("\(pager.rowCount) document(s)")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.5))
+                        .foregroundColor(Color.uiTextMuted)
                     Spacer()
-                    Button(docMode == .table ? "🗂 Cards View" : "📊 Table View") {
+                    Button {
                         docMode = (docMode == .table ? .documents : .table)
                         container.notifyUpdate()
+                    } label: {
+                        HStack(spacing: 5) {
+                            ModernIcon(docMode == .table ? .copy : .table, color: Color.uiTextMuted, size: 12)
+                            Text(docMode == .table ? "Cards View" : "Table View")
+                                .font(.caption)
+                                .foregroundColor(Color.uiTextPrimary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.uiPanel)
+                        .cornerRadius(4)
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.2)))
+                .padding(.vertical, 5)
+                .background(Color.uiSidebar)
             }
 
             if pager.hasDocuments && docMode != .table {
@@ -177,36 +239,58 @@ private struct TableDataView: View {
     }
 
     private func slowSortBanner(column: String) -> some View {
-        HStack {
-            Text("🐢 No index starts with “\(column)”, so every page scans the whole table.")
+        HStack(spacing: 8) {
+            ModernIcon(.warning, color: Color.uiWarning, size: 13)
+            Text("No index starts with “\(column)” - full table scan required.")
                 .font(.caption)
-                .foregroundColor(Color.hex(0x856404))
+                .foregroundColor(Color.uiWarning)
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(Color.adaptive(light: Color.hex(0xFFF3CD), dark: Color.hex(0x332701)))
+        .padding(.vertical, 5)
+        .background(Color.adaptive(light: Color.hex(0xFFFBEB), dark: Color.hex(0x271F0C)))
     }
 
     private var stagedBanner: some View {
         HStack(spacing: 12) {
-            Text("⚠️ \(pager.staged.count) staged change(s)")
-                .font(.caption)
-                .foregroundColor(Color.hex(0x856404))
+            HStack(spacing: 6) {
+                ModernIcon(.edit, color: Color.uiWarning, size: 12)
+                Text("\(pager.staged.count) staged change(s)")
+                    .font(.caption)
+                    .foregroundColor(Color.uiWarning)
+            }
 
             Spacer()
 
-            Button("Review & Apply") {
+            Button {
                 onShowReview()
+            } label: {
+                Text("Review & Apply")
+                    .font(.caption)
+                    .foregroundColor(Color.uiTextPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.uiPanel)
+                    .cornerRadius(4)
             }
+            .buttonStyle(.plain)
 
-            Button("Discard All") {
+            Button {
                 pager.discardEdits()
                 container.notifyUpdate()
+            } label: {
+                Text("Discard All")
+                    .font(.caption)
+                    .foregroundColor(Color.uiDanger)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.uiPanel)
+                    .cornerRadius(4)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(Color.from(pair: DataPalette.staged))
     }
 
@@ -262,55 +346,174 @@ private struct TableDataView: View {
 
     private var paginationFooter: some View {
         HStack(spacing: 12) {
-            Button("◀ Previous") {
+            Button {
                 Task {
                     await pager.prev()
                     container.notifyUpdate()
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    ModernIcon(.chevronLeft, color: Color.uiTextMuted, size: 9)
+                    Text("Prev")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
             }
+            .buttonStyle(.plain)
 
             Text(pager.rangeText)
                 .font(.caption)
-                .foregroundColor(Color(white: 0.5))
+                .foregroundColor(Color.uiTextMuted)
 
             if let ms = pager.elapsedMs {
-                Text("⚡ \(ms) ms")
-                    .font(.caption)
-                    .foregroundColor(Color(white: 0.6))
+                HStack(spacing: 4) {
+                    ModernIcon(.history, color: Color.uiTextFaint, size: 10)
+                    Text("\(ms) ms")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextFaint)
+                }
             }
 
-            Button("Next ▶") {
+            Button {
                 Task {
                     await pager.next()
                     container.notifyUpdate()
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Next")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                    ModernIcon(.chevronRight, color: Color.uiTextMuted, size: 9)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+
+            if !exportStatus.isEmpty {
+                HStack(spacing: 4) {
+                    ModernIcon(.checkmark, color: Color.uiSuccess, size: 9)
+                    Text(exportStatus)
+                        .font(.caption2)
+                        .foregroundColor(Color.uiSuccess)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.adaptive(light: Color.hex(0xECFDF5), dark: Color.hex(0x064E3B)))
+                .cornerRadius(4)
             }
 
             Spacer()
 
-            Button("📋 CSV") {
-                #if os(macOS)
-                AppKit.NSPasteboard.general.clearContents()
-                AppKit.NSPasteboard.general.setString(pager.exportCSV(), forType: .string)
-                #endif
+            Button {
+                Task {
+                    let result = await ExportFileHelper.saveFile(
+                        content: pager.exportCSV(),
+                        defaultName: tab.title,
+                        fileExtension: "csv",
+                        saveAction: chooseFileSaveDestination
+                    )
+                    if !result.message.isEmpty {
+                        exportStatus = result.message
+                        container.notifyUpdate()
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    ModernIcon(.export, color: Color.uiTextPrimary, size: 11)
+                    Text("Export CSV")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
             }
+            .buttonStyle(.plain)
 
-            Button("📋 JSON") {
-                #if os(macOS)
-                AppKit.NSPasteboard.general.clearContents()
-                AppKit.NSPasteboard.general.setString(pager.exportJSON(pretty: true), forType: .string)
-                #endif
+            Button {
+                Task {
+                    let result = await ExportFileHelper.saveFile(
+                        content: pager.exportJSON(pretty: true),
+                        defaultName: tab.title,
+                        fileExtension: "json",
+                        saveAction: chooseFileSaveDestination
+                    )
+                    if !result.message.isEmpty {
+                        exportStatus = result.message
+                        container.notifyUpdate()
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    ModernIcon(.export, color: Color.uiTextPrimary, size: 11)
+                    Text("Export JSON")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
             }
+            .buttonStyle(.plain)
+
+            Button {
+                ExportFileHelper.copyToClipboard(pager.exportCSV())
+                exportStatus = "Copied CSV"
+                container.notifyUpdate()
+            } label: {
+                HStack(spacing: 4) {
+                    ModernIcon(.copy, color: Color.uiTextMuted, size: 11)
+                    Text("Copy CSV")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                ExportFileHelper.copyToClipboard(pager.exportJSON(pretty: true))
+                exportStatus = "Copied JSON"
+                container.notifyUpdate()
+            } label: {
+                HStack(spacing: 4) {
+                    ModernIcon(.copy, color: Color.uiTextMuted, size: 11)
+                    Text("Copy JSON")
+                        .font(.caption)
+                        .foregroundColor(Color.uiTextPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.uiPanel)
+                .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
 
             if pager.isLoading || isRefreshing {
-                Text("Loading...")
-                    .font(.caption)
-                    .foregroundColor(Color.hex(0x007ACC))
+                HStack(spacing: 5) {
+                    ModernIcon(.refresh, color: Color.uiAccent, size: 10)
+                    Text("Loading...")
+                        .font(.caption)
+                        .foregroundColor(Color.uiAccent)
+                }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.19)))
+        .background(Color.uiSidebar)
     }
 }
 
@@ -321,61 +524,84 @@ private struct TableStructureView: View {
 
     var body: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let err = tab.structureError {
-                    Text("Error loading structure: \(err)")
-                        .font(.body)
-                        .foregroundColor(Color.hex(0xDC3545))
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let err = tab.structureError {
+                        HStack(spacing: 8) {
+                            ModernIcon(.warning, color: Color.uiDanger, size: 14)
+                            Text("Error loading structure: \(err)")
+                                .font(.body)
+                                .foregroundColor(Color.uiDanger)
+                        }
                         .padding(16)
-                } else if tab.structure.isEmpty {
-                    Text("No columns or fields information loaded.")
-                        .font(.body)
-                        .foregroundColor(Color(white: 0.5))
-                        .padding(16)
-                } else {
-                    structureHeader
-                    ForEach(tab.structure, id: \.name) { node in
-                        HStack(spacing: 12) {
-                            Text(node.name)
-                                .font(.system(size: 13, design: .monospaced))
-                                .frame(minWidth: 160, alignment: .leading)
-                            Text(node.detail ?? "-")
-                                .font(.caption)
-                                .foregroundColor(Color.hex(0x007ACC))
-                                .frame(minWidth: 180, alignment: .leading)
-                            if workspace.config.kind.isSQL && node.kind == .column {
-                                Button("✏️ Change Type") {
-                                    let typeName = (node.detail ?? "").components(separatedBy: " · ").first ?? ""
-                                    workspace.presentChangeColumnType(
-                                        column: node.name,
-                                        currentType: typeName,
-                                        tablePath: tab.path,
-                                        tableName: tab.title
-                                    )
-                                    container.notifyUpdate()
+                    } else if tab.structure.isEmpty {
+                        Text("No columns or fields information loaded.")
+                            .font(.body)
+                            .foregroundColor(Color.uiTextMuted)
+                            .padding(16)
+                    } else {
+                        structureHeader
+                        ForEach(tab.structure, id: \.name) { node in
+                            HStack(spacing: 12) {
+                                Text(node.name)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .foregroundColor(Color.uiTextPrimary)
+                                    .frame(minWidth: 160, alignment: .leading)
+
+                                Text(node.detail ?? "-")
+                                    .font(.caption)
+                                    .foregroundColor(Color.uiAccent)
+                                    .frame(minWidth: 180, alignment: .leading)
+
+                                if workspace.config.kind.isSQL && node.kind == .column {
+                                    Button {
+                                        let typeName = (node.detail ?? "").components(separatedBy: " · ").first ?? ""
+                                        workspace.presentChangeColumnType(
+                                            column: node.name,
+                                            currentType: typeName,
+                                            tablePath: tab.path,
+                                            tableName: tab.title
+                                        )
+                                        container.notifyUpdate()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            ModernIcon(.edit, color: Color.uiAccent, size: 11)
+                                            Text("Change Type")
+                                                .font(.caption)
+                                                .foregroundColor(Color.uiTextPrimary)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(Color.uiPanel)
+                                        .cornerRadius(4)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
                     }
                 }
+                .padding(12)
+
+                Spacer()
             }
-            .padding(12)
         }
+        .background(Color.uiBackground)
     }
 
     private var structureHeader: some View {
         HStack(spacing: 12) {
-            Text("Name").font(.caption).frame(minWidth: 160, alignment: .leading)
-            Text("Type / Details").font(.caption).frame(minWidth: 180, alignment: .leading)
+            Text("COLUMN NAME").font(.caption).foregroundColor(Color.uiTextMuted).frame(minWidth: 160, alignment: .leading)
+            Text("TYPE / DETAILS").font(.caption).foregroundColor(Color.uiTextMuted).frame(minWidth: 180, alignment: .leading)
             if workspace.config.kind.isSQL {
-                Text("Action").font(.caption).frame(minWidth: 100, alignment: .leading)
+                Text("ACTION").font(.caption).foregroundColor(Color.uiTextMuted).frame(minWidth: 100, alignment: .leading)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
+        .padding(.vertical, 7)
+        .background(Color.uiSidebar)
     }
 }
 
@@ -383,20 +609,25 @@ private struct TableDDLView: View {
     let tab: TableTabModel
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            VStack(alignment: .leading, spacing: 8) {
-                if !tab.ddl.isEmpty {
-                    Text(tab.ddl)
-                        .font(.system(size: 13, design: .monospaced))
-                        .padding(16)
-                } else {
-                    Text("No DDL definition available for this object.")
-                        .font(.body)
-                        .foregroundColor(Color(white: 0.5))
-                        .padding(16)
+        ScrollView(.vertical) {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !tab.ddl.isEmpty {
+                        Text(tab.ddl)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(Color.uiTextPrimary)
+                            .padding(16)
+                    } else {
+                        Text("No DDL definition available for this object.")
+                            .font(.body)
+                            .foregroundColor(Color.uiTextMuted)
+                            .padding(16)
+                    }
                 }
+                Spacer()
             }
         }
+        .background(Color.uiBackground)
     }
 }
 
@@ -404,43 +635,48 @@ private struct TableIndexesView: View {
     let tab: TableTabModel
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            VStack(alignment: .leading, spacing: 0) {
-                indexesHeader
+        ScrollView(.vertical) {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    indexesHeader
 
-                if tab.indexes.isEmpty {
-                    Text("No indexes defined for this collection or table.")
-                        .font(.body)
-                        .foregroundColor(Color(white: 0.5))
-                        .padding(16)
-                } else {
-                    ForEach(tab.indexes, id: \.name) { index in
-                        HStack(spacing: 12) {
-                            Text(index.name)
-                                .font(.system(size: 13, design: .monospaced))
-                                .frame(minWidth: 160, alignment: .leading)
+                    if tab.indexes.isEmpty {
+                        Text("No indexes defined for this collection or table.")
+                            .font(.body)
+                            .foregroundColor(Color.uiTextMuted)
+                            .padding(16)
+                    } else {
+                        ForEach(tab.indexes, id: \.name) { index in
+                            HStack(spacing: 12) {
+                                Text(index.name)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .foregroundColor(Color.uiTextPrimary)
+                                    .frame(minWidth: 160, alignment: .leading)
 
-                            Text(index.detail ?? "")
-                                .font(.caption)
-                                .foregroundColor(Color(white: 0.6))
-                                .frame(minWidth: 240, alignment: .leading)
+                                Text(index.detail ?? "")
+                                    .font(.caption)
+                                    .foregroundColor(Color.uiTextMuted)
+                                    .frame(minWidth: 240, alignment: .leading)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.uiBackground)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.adaptive(light: Color(white: 0.98), dark: Color(white: 0.16)))
                     }
                 }
+                Spacer()
             }
         }
+        .background(Color.uiBackground)
     }
 
     private var indexesHeader: some View {
         HStack(spacing: 12) {
-            Text("Index Name").font(.caption).frame(minWidth: 160, alignment: .leading)
-            Text("Keys & Properties").font(.caption).frame(minWidth: 240, alignment: .leading)
+            Text("INDEX NAME").font(.caption).foregroundColor(Color.uiTextMuted).frame(minWidth: 160, alignment: .leading)
+            Text("KEYS & PROPERTIES").font(.caption).foregroundColor(Color.uiTextMuted).frame(minWidth: 240, alignment: .leading)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
+        .padding(.vertical, 7)
+        .background(Color.uiSidebar)
     }
 }

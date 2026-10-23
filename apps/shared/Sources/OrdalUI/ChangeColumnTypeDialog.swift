@@ -72,20 +72,23 @@ public struct ChangeColumnTypeDialog: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
-            HStack(spacing: 8) {
-                Text("🔄")
-                    .font(.title2)
+            HStack(spacing: 10) {
+                ModernIcon(.refresh, color: Color.uiAccent, size: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Change Column Data Type")
                         .font(.title3)
+                        .foregroundColor(Color.uiTextPrimary)
                     Text("Column: \(target.column) on \(target.tableName) · Current: \(target.currentType.isEmpty ? "unknown" : target.currentType)")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.6))
+                        .foregroundColor(Color.uiTextMuted)
                 }
                 Spacer()
-                Button("✕") {
+                Button {
                     onDismiss()
+                } label: {
+                    ModernIcon(.close, color: Color.uiTextMuted, size: 11)
                 }
+                .buttonStyle(.plain)
             }
 
             Divider()
@@ -149,10 +152,22 @@ public struct ChangeColumnTypeDialog: View {
                         .foregroundColor(Color(white: 0.7))
                     Spacer()
                     #if os(macOS)
-                    Button("📋 Copy") {
+                    Button {
                         AppKit.NSPasteboard.general.clearContents()
                         AppKit.NSPasteboard.general.setString(previewSQL, forType: .string)
+                    } label: {
+                        HStack(spacing: 4) {
+                            ModernIcon(.copy, color: Color.uiTextMuted, size: 10)
+                            Text("Copy")
+                                .font(.caption)
+                                .foregroundColor(Color.uiTextPrimary)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.uiPanel)
+                        .cornerRadius(3)
                     }
+                    .buttonStyle(.plain)
                     #endif
                 }
 
@@ -167,32 +182,53 @@ public struct ChangeColumnTypeDialog: View {
 
             if isApplying {
                 HStack(spacing: 8) {
-                    Text("⏳")
+                    ModernIcon(.refresh, color: Color.uiAccent, size: 12)
                     Text("Altering column type to \(newType)...")
                         .font(.caption)
-                        .foregroundColor(Color(white: 0.6))
+                        .foregroundColor(Color.uiAccent)
                 }
             } else if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundColor(Color.hex(0xDC3545))
+                HStack(spacing: 6) {
+                    ModernIcon(.warning, color: Color.uiDanger, size: 12)
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundColor(Color.uiDanger)
+                }
             }
 
             Divider()
 
             // Actions
             HStack {
-                Button("Cancel") {
+                Button {
                     onDismiss()
+                } label: {
+                    Text("Cancel")
+                        .font(.body)
+                        .foregroundColor(Color.uiTextPrimary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.uiPanel)
+                        .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
 
-                Button("Change Type") {
+                Button {
                     Task {
                         await performChange()
                     }
+                } label: {
+                    Text("Change Type")
+                        .font(.body)
+                        .foregroundColor(Color.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 5)
+                        .background(canApply ? Color.uiAccent : Color(white: 0.3))
+                        .cornerRadius(5)
                 }
+                .buttonStyle(.plain)
                 .disabled(!canApply || isApplying)
             }
         }

@@ -23,7 +23,7 @@ public struct RowItem: Identifiable {
     }
 }
 
-/// Native cross-platform database results grid with typed cell coloring and header sorting.
+/// Modern native cross-platform database results grid with clean spreadsheet aesthetics and typed cell coloring.
 public struct ResultGrid: View {
     let source: any GridDataSource
     var onSelectCell: ((Int, Int) -> Void)?
@@ -51,21 +51,60 @@ public struct ResultGrid: View {
         return (0..<count).map { RowItem(id: $0, row: source.row(at: $0)) }
     }
 
+    private var columnWidths: [Int: Double] {
+        var widths: [Int: Double] = [:]
+        let sampleCount = min(source.rowCount, 40)
+        for colItem in columnsIndexed {
+            var maxLen = min(colItem.column.name.count, 25)
+            for r in 0..<sampleCount {
+                if let row = source.row(at: r), colItem.id < row.cells.count {
+                    let len = min(row.cells[colItem.id].cellText.count, 35)
+                    if len > maxLen {
+                        maxLen = len
+                    }
+                }
+            }
+            // Estimate pixel width: ~8.2px per character + 28px padding, bounded between 100 and 260
+            let estimated = Double(maxLen) * 8.2 + 28.0
+            widths[colItem.id] = min(max(estimated, 100.0), 260.0)
+        }
+        return widths
+    }
+
+    private func totalTableWidth(widths: [Int: Double]) -> Double {
+        var total: Double = 0
+        for col in columnsIndexed {
+            total += (widths[col.id] ?? 120.0)
+        }
+        if !columnsIndexed.isEmpty {
+            total += Double(columnsIndexed.count - 1) * 1.0 // 1px spacing
+        }
+        return total
+    }
+
     public var body: some View {
         if source.columns.isEmpty {
             VStack {
                 Spacer()
                 Text("No data to display")
-                    .foregroundColor(Color(white: 0.5))
+                    .foregroundColor(Color.uiTextMuted)
                     .font(.body)
                 Spacer()
             }
         } else {
-            VStack(spacing: 0) {
+            GeometryReader { proxy in
+                let widths = columnWidths
+                let tableWidth = totalTableWidth(widths: widths)
+                let availWidth = max(proxy.size.width, 0.0)
+                let availHeight = max(proxy.size.height, 0.0)
+                let minW = max(tableWidth, availWidth)
+                let minH = availHeight
+
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 1) {
                         GridHeaderView(
                             columns: columnsIndexed,
+                            columnWidths: widths,
                             sort: source.sort,
                             onSortColumn: onSortColumn
                         )
@@ -73,7 +112,7 @@ public struct ResultGrid: View {
                         if source.rowCount == 0 {
                             HStack {
                                 Text("(0 rows returned)")
-                                    .foregroundColor(Color(white: 0.5))
+                                    .foregroundColor(Color.uiTextMuted)
                                     .font(.caption)
                                     .padding(12)
                                 Spacer()
@@ -86,6 +125,7 @@ public struct ResultGrid: View {
                                 RowCellsView(
                                     row: rowItem.row,
                                     columns: columnsIndexed,
+                                    columnWidths: widths,
                                     rowIndex: rowIndex,
                                     selectedCol: selectedCol,
                                     isRowSelected: isRowSelected,
@@ -98,22 +138,34 @@ public struct ResultGrid: View {
                                 )
                                 .background(
                                     isRowSelected
-                                        ? Color.adaptive(light: Color(white: 0.82), dark: Color(white: 0.25))
+                                        ? Color.adaptive(
+                                            light: Color.hex(0xDBEAFE),
+                                            dark: Color.hex(0x1E2A3C)
+                                        )
                                         : (rowIndex % 2 == 0
-                                            ? Color.adaptive(light: Color(white: 0.98), dark: Color(white: 0.14))
-                                            : Color.adaptive(light: Color(white: 0.93), dark: Color(white: 0.17)))
+                                            ? Color.adaptive(
+                                                light: Color.hex(0xFFFFFF),
+                                                dark: Color.hex(0x111620)
+                                            )
+                                            : Color.adaptive(
+                                                light: Color.hex(0xF8FAFC),
+                                                dark: Color.hex(0x151B27)
+                                            ))
                                 )
                             }
                         }
                     }
+                    .frame(minWidth: minW, minHeight: minH, alignment: .topLeading)
                 }
             }
+            .background(Color.uiBackground)
         }
     }
 }
 
 private struct GridHeaderView: View {
     let columns: [ColumnIndexed]
+    let columnWidths: [Int: Double]
     let sort: GridSort?
     let onSortColumn: ((String) -> Void)?
 
@@ -122,23 +174,43 @@ private struct GridHeaderView: View {
             ForEach(columns, id: \.id) { colItem in
                 let col = colItem.column
                 let isSorted = sort?.column == col.name
-                let sortArrow = isSorted ? (sort?.descending == true ? " ▼" : " ▲") : ""
+                let width = columnWidths[colItem.id] ?? 120.0
 
-                Button("\(col.name)\(sortArrow)") {
+                Button {
                     onSortColumn?(col.name)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(col.name)
+                            .font(.system(size: 12))
+                            .foregroundColor(
+                                isSorted
+                                    ? Color.uiAccent
+                                    : Color.uiTextPrimary
+                            )
+
+                        if isSorted {
+                            ModernIcon(
+                                sort?.descending == true ? .chevronDown : .chevronUp,
+                                color: Color.uiAccent,
+                                size: 8,
+                                strokeWidth: 1.8
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(width: width, alignment: .leading)
                 }
-                .frame(minWidth: 120, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .buttonStyle(.plain)
                 .background(
                     isSorted
                         ? Color.adaptive(
-                            light: Color(white: 0.76),
-                            dark: Color(white: 0.32)
+                            light: Color.hex(0xE2E8F0),
+                            dark: Color.hex(0x242F42)
                         )
                         : Color.adaptive(
-                            light: Color(white: 0.88),
-                            dark: Color(white: 0.22)
+                            light: Color.hex(0xF1F5F9),
+                            dark: Color.hex(0x1A2230)
                         )
                 )
             }
@@ -149,6 +221,7 @@ private struct GridHeaderView: View {
 private struct RowCellsView: View {
     let row: Row?
     let columns: [ColumnIndexed]
+    let columnWidths: [Int: Double]
     let rowIndex: Int
     let selectedCol: Int?
     let isRowSelected: Bool
@@ -163,10 +236,12 @@ private struct RowCellsView: View {
                 let val = (row != nil && colIndex < row!.cells.count) ? row!.cells[colIndex] : Value.null
                 let isCellSelected = isRowSelected && selectedCol == colIndex
                 let staged = isStaged(rowIndex, colIndex)
+                let width = columnWidths[colIndex] ?? 120.0
 
                 CellView(
                     value: val,
                     kind: col.kind,
+                    width: width,
                     isStaged: staged,
                     isSelected: isCellSelected
                 ) {
@@ -180,9 +255,19 @@ private struct RowCellsView: View {
 private struct CellView: View {
     let value: Value
     let kind: ValueKind
+    let width: Double
     let isStaged: Bool
     let isSelected: Bool
     let onTap: () -> Void
+
+    private var displayText: String {
+        let text = value.cellText
+        let limit = 35
+        if text.count > limit {
+            return String(text.prefix(limit)) + "…"
+        }
+        return text
+    }
 
     var body: some View {
         let role = DataPalette.role(for: kind, value: value)
@@ -190,24 +275,29 @@ private struct CellView: View {
             if let pair = DataPalette.colors(for: role) {
                 return Color.from(pair: pair)
             } else if role == .muted {
-                return Color(white: 0.5)
+                return Color.uiTextMuted
             } else {
-                return Color.adaptive(light: Color(white: 0.1), dark: Color(white: 0.9))
+                return Color.uiTextPrimary
             }
         }()
 
-        Button(value.cellText) {
+        Button(displayText) {
             onTap()
         }
-        .frame(minWidth: 120, alignment: kind.isNumeric ? .trailing : .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .buttonStyle(.plain)
+        .font(.system(size: 13, design: kind.isNumeric ? .monospaced : .default))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(width: width, alignment: kind.isNumeric ? .trailing : .leading)
         .foregroundColor(textColor)
         .background(
             isStaged
                 ? Color.from(pair: DataPalette.staged)
                 : (isSelected
-                    ? Color.adaptive(light: Color.hex(0xBBDDFF), dark: Color.hex(0x224466))
+                    ? Color.adaptive(
+                        light: Color.hex(0xBFDBFE),
+                        dark: Color.hex(0x1D4ED8)
+                    )
                     : Color.clear)
         )
     }

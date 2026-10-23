@@ -53,6 +53,29 @@
       }
     },
     {
+      "label": "Build OrdalPreview",
+      "type": "shell",
+      "dependsOn": "Build Rust core + bindings",
+      "command": "swift build",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/shared"
+      },
+      "problemMatcher": [
+        "$swiftc"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Run OrdalPreview",
+      "type": "shell",
+      "dependsOn": "Build Rust core + bindings",
+      "command": "swift run OrdalPreview",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/shared"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Run app",
       "type": "shell",
       "dependsOn": "Build Rust core + bindings",

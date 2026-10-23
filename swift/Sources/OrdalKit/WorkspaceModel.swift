@@ -78,9 +78,11 @@ public final class WorkspaceModel: Identifiable {
     }
 
     public func start() async {
-        serverInfo = try? await session.serverInfo()
-        await browser.loadRoots()
-        await refreshLatency()
+        async let sInfo = try? session.serverInfo()
+        async let roots: () = browser.loadRoots()
+        async let latency: () = refreshLatency()
+        serverInfo = await sInfo
+        _ = await (roots, latency)
         if tabs.isEmpty { newQueryTab() }
     }
 
