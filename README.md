@@ -146,3 +146,12 @@ load `scripts/seed-1m.sql`, then `cargo test --release --test postgres -- --igno
 - [ ] Phase 3: staged edits + review sheet, export/import, SSH tunnels
 - [ ] Phase 4: power tools (explain plans, ER diagram, aggregation builder)
 - [ ] Phase 5: Windows (WinUI) and Linux (GTK) apps on the same core and `OrdalKit`
+
+## License & Distribution
+
+This project is licensed under a custom **Source-Available License** (see [LICENSE](file:///Users/reizhafajrian/Downloads/dbclient/LICENSE)):
+
+- **Personal Use:** Free to inspect, study, build, and use for personal, educational, and research purposes.
+- **Company Internal Use:** Organizations are permitted to compile and use the software internally for their employees and operations free of charge.
+- **Commercial Restrictions:** You may NOT resell, rebrand, white-label, package as a commercial service/product, or redistribute pre-compiled binaries to third parties without prior written consent from the author.
+- **Contributions:** All contributions are submitted voluntarily under an irrevocable, royalty-free grant to the project owner, ensuring the owner retains sole authority over future relicensing and development.

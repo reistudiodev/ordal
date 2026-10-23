@@ -1,0 +1,86 @@
+# Source-Available License & Contributor Terms
+
+Copyright (c) 2026 Reizha Fajrian ("Copyright Holder"). All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to inspect,
+study, modify, and compile the Software, subject to the following terms and conditions:
+
+---
+
+### 1. PERMITTED USES
+
+#### A. Personal & Educational Use
+Individuals may freely clone, compile, build, and run the Software for personal, 
+educational, research, and non-commercial purposes without cost.
+
+#### B. Internal Organizational & Enterprise Use
+Companies, organizations, and businesses may clone, compile, and run the Software 
+internally for their own internal business operations and employees (e.g., managing 
+internal databases) free of charge, provided that:
+- The Software is used strictly within the organization.
+- The Software is NOT redistributed, sublicensed, or packaged as a service or product 
+  to any external client or third party.
+
+---
+
+### 2. STRICT PROHIBITIONS
+
+#### A. No Commercial Resale or Redistribution
+You may NOT sell, resell, lease, rent, sublicense, or distribute the Software or 
+any part thereof (including source code or compiled binaries) to any third party 
+for commercial gain, financial compensation, or paid consulting deliverables without 
+explicit prior written authorization from the Copyright Holder.
+
+#### B. No Rebranding or White-Labeling
+You may NOT rebrand, rename, white-label, or package the Software (or any derivative 
+work) to present or sell it to third parties or B2B clients as your own product or service.
+
+#### C. Official Binary Exclusivity
+Pre-compiled binaries, installers (.dmg, .app, .exe, packages), and official 
+release artifacts are exclusively built, distributed, and monetized by the Copyright Holder. 
+Public redistribution of pre-compiled binaries (whether free or paid) without prior written 
+consent is prohibited.
+
+#### D. Derivative Works
+Creating modifications, forks, or derivative works does NOT waive any restrictions 
+in this license. All derivative works remain strictly subject to these terms.
+
+---
+
+### 3. CONTRIBUTOR AGREEMENT & IP ASSIGNMENT (CLA)
+
+By submitting any contribution to this repository or project (including code, pull requests, 
+patches, issues, documentation, or suggestions):
+
+1. **Royalty-Free & Irrevocable Grant:**  
+   You irrevocably grant the Copyright Holder a perpetual, worldwide, non-exclusive, 
+   royalty-free, fully paid-up, transferable license to use, reproduce, modify, adapt, 
+   publish, distribute, sublicense, and commercialize your contribution in any form.
+
+2. **No Claim to Ownership or Compensation:**  
+   You acknowledge and agree that your contribution is voluntary and does NOT entitle 
+   you to any compensation, royalties, financial claims, or copyright co-ownership over 
+   the Software now or in the future.
+
+3. **Sole Right to Relicense:**  
+   The Copyright Holder retains the sole, absolute, and unilateral right to change the 
+   license of the Software at any time (including, but not limited to, converting future 
+   versions into closed-source, proprietary, or commercial licensing models) without 
+   requiring approval from or notice to any contributor.
+
+4. **Originality:**  
+   You represent and warrant that your contributions are your original creation and that 
+   you have the full legal right to grant the permissions stated above.
+
+---
+
+### 4. DISCLAIMER OF WARRANTIES & LIMITATION OF LIABILITY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
