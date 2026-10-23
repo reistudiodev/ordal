@@ -149,7 +149,7 @@ load `scripts/seed-1m.sql`, then `cargo test --release --test postgres -- --igno
 
 ## License & Distribution
 
-This project is licensed under a custom **Source-Available License** (see [LICENSE](file:///Users/reizhafajrian/Downloads/dbclient/LICENSE)):
+This project is licensed under a custom **Source-Available License** (see [LICENSE.md](file:///Users/reizhafajrian/Downloads/dbclient/LICENSE.md)):
 
 - **Personal Use:** Free to inspect, study, build, and use for personal, educational, and research purposes.
 - **Company Internal Use:** Organizations are permitted to compile and use the software internally for their employees and operations free of charge.
