@@ -56,12 +56,8 @@ else
   echo "warning: MACOS_CERTIFICATE not set, keeping the ad-hoc signature (not notarized)" >&2
 fi
 
-echo "==> Building $DMG"
-mkdir -p "$WORK/dmg"
-cp -R "$APP" "$WORK/dmg/"
-ln -s /Applications "$WORK/dmg/Applications"
-rm -f "$DMG"
-hdiutil create -volname "Ordal" -srcfolder "$WORK/dmg" -ov -format UDZO "$DMG" >/dev/null
+echo "==> Building styled $DMG"
+"$ROOT/scripts/build-dmg.sh" "$APP" "$DMG"
 [ -n "$IDENTITY" ] && codesign --force --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$DMG"
 
 if [ -n "$IDENTITY" ] && [ -n "${APPLE_API_KEY_ID:-}" ]; then

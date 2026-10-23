@@ -2,12 +2,17 @@ import Foundation
 import OrdalCore
 import OrdalKit
 import SwiftCrossUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Native cross-platform query editor, execution toolbar, and results pane.
 public struct QueryTabView: View {
     let container: AppStateContainer
     let tab: QueryTabModel
     let workspace: WorkspaceModel
+
+    @State private var showHistoryDialog = false
 
     public init(container: AppStateContainer, tab: QueryTabModel, workspace: WorkspaceModel) {
         self.container = container
@@ -16,31 +21,61 @@ public struct QueryTabView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            QueryExecutionToolbar(
-                container: container,
-                tab: tab,
-                workspace: workspace
-            )
-
-            if let notice = tab.notice {
-                queryNoticeBanner(notice)
-            }
-
+        ZStack {
             VStack(spacing: 0) {
-                TextEditor(text: Binding(get: { tab.text }, set: { tab.text = $0 }))
-                    .frame(minHeight: 120, maxHeight: 240)
-                    .padding(8)
-
-                resultsDividerBar
-
-                QueryResultsPane(
+                QueryExecutionToolbar(
                     container: container,
                     tab: tab,
-                    workspace: workspace
+                    workspace: workspace,
+                    onShowHistory: {
+                        showHistoryDialog = true
+                        container.notifyUpdate()
+                    }
                 )
+
+                if let notice = tab.notice {
+                    queryNoticeBanner(notice)
+                }
+
+                VStack(spacing: 0) {
+                    TextEditor(text: Binding(get: { tab.text }, set: { tab.text = $0 }))
+                        .frame(minHeight: 120, maxHeight: 240)
+                        .padding(8)
+
+                    resultsDividerBar
+
+                    QueryResultsPane(
+                        container: container,
+                        tab: tab,
+                        workspace: workspace
+                    )
+                }
+            }
+
+            if showHistoryDialog {
+                historyDialogOverlay
             }
         }
+    }
+
+    private var historyDialogOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                QueryHistoryDialog(
+                    container: container,
+                    tab: tab,
+                    onDismiss: {
+                        showHistoryDialog = false
+                        container.notifyUpdate()
+                    }
+                )
+                Spacer()
+            }
+            Spacer()
+        }
+        .background(Color(white: 0.0, opacity: 0.5))
     }
 
     private func queryNoticeBanner(_ notice: String) -> some View {
@@ -56,11 +91,36 @@ public struct QueryTabView: View {
     }
 
     private var resultsDividerBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("Results")
                 .font(.caption)
                 .foregroundColor(Color(white: 0.5))
+
+            if let pager = tab.pager, !pager.columns.isEmpty {
+                Text("•")
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.5))
+                Text("\(pager.rowCount) rows · ⚡ \(pager.elapsedMs) ms")
+                    .font(.caption)
+                    .foregroundColor(Color.hex(0x28A745))
+            }
+
             Spacer()
+
+            if let pager = tab.pager, !pager.columns.isEmpty {
+                Button("📋 Copy CSV") {
+                    #if os(macOS)
+                    AppKit.NSPasteboard.general.clearContents()
+                    AppKit.NSPasteboard.general.setString(pager.exportCSV(), forType: .string)
+                    #endif
+                }
+                Button("📋 Copy JSON") {
+                    #if os(macOS)
+                    AppKit.NSPasteboard.general.clearContents()
+                    AppKit.NSPasteboard.general.setString(pager.exportJSON(pretty: true), forType: .string)
+                    #endif
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -77,6 +137,7 @@ private struct QueryExecutionToolbar: View {
     let container: AppStateContainer
     let tab: QueryTabModel
     let workspace: WorkspaceModel
+    let onShowHistory: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -87,6 +148,10 @@ private struct QueryExecutionToolbar: View {
                     tab.format()
                     container.notifyUpdate()
                 }
+            }
+
+            Button("📜 History (\(tab.history.count))") {
+                onShowHistory()
             }
 
             if let db = tab.database ?? (workspace.config.database.isEmpty ? nil : workspace.config.database) {
@@ -162,49 +227,50 @@ private struct QueryResultsPane: View {
     let tab: QueryTabModel
     let workspace: WorkspaceModel
 
+    @State private var docMode: DocumentViewMode = .documents
+
     var body: some View {
         if let pager = tab.pager {
             if pager.hasDocuments {
-                DocumentListView(
-                    source: pager,
-                    onSelectField: { rowIndex, _ in
-                        guard let col = pager.columns.first,
-                              let row = pager.row(at: rowIndex) else { return }
-                        let val = row.cells.first ?? Value.null
-                        workspace.inspected = WorkspaceModel.InspectedCell(
-                            column: col,
-                            value: val,
-                            row: rowIndex,
-                            columnIndex: 0,
-                            tableTab: nil
-                        )
-                        container.app.showInspector = true
-                        container.notifyUpdate()
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("\(pager.rowCount) document(s)")
+                            .font(.caption)
+                            .foregroundColor(Color(white: 0.5))
+                        Spacer()
+                        Button(docMode == .table ? "🗂 Cards View" : "📊 Table View") {
+                            docMode = (docMode == .table ? .documents : .table)
+                            container.notifyUpdate()
+                        }
                     }
-                )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.2)))
+
+                    if docMode == .table {
+                        resultGrid(pager: pager)
+                    } else {
+                        DocumentListView(
+                            source: pager,
+                            onSelectField: { rowIndex, _ in
+                                guard let col = pager.columns.first,
+                                      let row = pager.row(at: rowIndex) else { return }
+                                let val = row.cells.first ?? Value.null
+                                workspace.inspected = WorkspaceModel.InspectedCell(
+                                    column: col,
+                                    value: val,
+                                    row: rowIndex,
+                                    columnIndex: 0,
+                                    tableTab: nil
+                                )
+                                container.app.showInspector = true
+                                container.notifyUpdate()
+                            }
+                        )
+                    }
+                }
             } else {
-                ResultGrid(
-                    source: pager,
-                    onSelectCell: { rowIndex, colIndex in
-                        guard colIndex < pager.columns.count,
-                              let row = pager.row(at: rowIndex) else { return }
-                        let col = pager.columns[colIndex]
-                        let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
-                        workspace.inspected = WorkspaceModel.InspectedCell(
-                            column: col,
-                            value: val,
-                            row: rowIndex,
-                            columnIndex: colIndex,
-                            tableTab: nil
-                        )
-                        container.app.showInspector = true
-                        container.notifyUpdate()
-                    },
-                    onSortColumn: { col in
-                        pager.toggleSort(column: col)
-                        container.notifyUpdate()
-                    }
-                )
+                resultGrid(pager: pager)
             }
         } else if case .failed(let error) = tab.status {
             ScrollView(.vertical) {
@@ -225,5 +291,30 @@ private struct QueryResultsPane: View {
                 Spacer()
             }
         }
+    }
+
+    private func resultGrid(pager: CursorPager) -> some View {
+        ResultGrid(
+            source: pager,
+            onSelectCell: { rowIndex, colIndex in
+                guard colIndex < pager.columns.count,
+                      let row = pager.row(at: rowIndex) else { return }
+                let col = pager.columns[colIndex]
+                let val = colIndex < row.cells.count ? row.cells[colIndex] : Value.null
+                workspace.inspected = WorkspaceModel.InspectedCell(
+                    column: col,
+                    value: val,
+                    row: rowIndex,
+                    columnIndex: colIndex,
+                    tableTab: nil
+                )
+                container.app.showInspector = true
+                container.notifyUpdate()
+            },
+            onSortColumn: { col in
+                pager.toggleSort(column: col)
+                container.notifyUpdate()
+            }
+        )
     }
 }

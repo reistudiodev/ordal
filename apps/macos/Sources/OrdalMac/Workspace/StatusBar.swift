@@ -86,6 +86,9 @@ struct StatusBar: View {
             }
         case .table(let t):
             let _ = t.pager.version
+            if let ms = t.pager.elapsedMs {
+                Text(t.pager.isLoading ? "fetching…" : "\(ms.formatted()) ms")
+            }
             if let count = t.pager.count {
                 Text("\(count.exact ? "" : "~")\(count.count.formatted()) rows")
             }

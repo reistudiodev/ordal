@@ -2,6 +2,9 @@ import Foundation
 import OrdalCore
 import OrdalKit
 import SwiftCrossUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Native cross-platform Table Tab View with Data, Structure, and DDL inspection.
 public struct TableTabView: View {
@@ -10,6 +13,7 @@ public struct TableTabView: View {
     let workspace: WorkspaceModel
 
     @State private var showReviewDialog: Bool = false
+    @State private var isRefreshing: Bool = false
 
     public init(container: AppStateContainer, tab: TableTabModel, workspace: WorkspaceModel) {
         self.container = container
@@ -31,22 +35,24 @@ public struct TableTabView: View {
 
     private var segmentHeader: some View {
         HStack(spacing: 8) {
-            Button(tab.segment == .data ? "● Data" : "Data") {
-                tab.segment = .data
-                container.notifyUpdate()
-            }
-            Button(tab.segment == .structure ? "● Structure" : "Structure") {
-                tab.segment = .structure
-                Task {
-                    await tab.loadStructure()
-                    container.notifyUpdate()
-                }
-            }
-            Button(tab.segment == .ddl ? "● DDL" : "DDL") {
-                tab.segment = .ddl
-                Task {
-                    await tab.loadStructure()
-                    container.notifyUpdate()
+            ForEach(tab.segments, id: \.id) { seg in
+                let isSelected = tab.segment == seg
+                let label: String = {
+                    if seg == .indexes && !tab.indexes.isEmpty {
+                        return isSelected ? "● Indexes (\(tab.indexes.count))" : "Indexes (\(tab.indexes.count))"
+                    }
+                    return isSelected ? "● \(seg.rawValue)" : seg.rawValue
+                }()
+                Button(label) {
+                    tab.segment = seg
+                    if seg == .structure || seg == .indexes || seg == .ddl {
+                        Task {
+                            await tab.loadStructure()
+                            container.notifyUpdate()
+                        }
+                    } else {
+                        container.notifyUpdate()
+                    }
                 }
             }
 
@@ -59,13 +65,17 @@ public struct TableTabView: View {
                 .foregroundColor(Color.hex(0x856404))
             }
 
-            Button("🔄 Refresh") {
+            Button(isRefreshing || tab.pager.isLoading ? "⏳ Refreshing…" : "🔄 Refresh") {
                 Task {
+                    isRefreshing = true
+                    container.notifyUpdate()
                     await tab.pager.refresh()
                     await tab.loadStructure()
+                    isRefreshing = false
                     container.notifyUpdate()
                 }
             }
+            .disabled(isRefreshing || tab.pager.isLoading)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -83,7 +93,9 @@ public struct TableTabView: View {
                 onShowReview: { showReviewDialog = true }
             )
         case .structure:
-            TableStructureView(tab: tab)
+            TableStructureView(container: container, workspace: workspace, tab: tab)
+        case .indexes:
+            TableIndexesView(tab: tab)
         case .ddl:
             TableDDLView(tab: tab)
         case .query:
@@ -119,6 +131,8 @@ private struct TableDataView: View {
     let workspace: WorkspaceModel
     let onShowReview: () -> Void
 
+    @State private var docMode: DocumentViewMode = .documents
+
     private var pager: TablePager { tab.pager }
 
     var body: some View {
@@ -127,7 +141,27 @@ private struct TableDataView: View {
                 stagedBanner
             }
 
+            if pager.sortIsSlow, let sort = pager.sort {
+                slowSortBanner(column: sort.column)
+            }
+
             if pager.hasDocuments {
+                HStack {
+                    Text("\(pager.rowCount) document(s)")
+                        .font(.caption)
+                        .foregroundColor(Color(white: 0.5))
+                    Spacer()
+                    Button(docMode == .table ? "🗂 Cards View" : "📊 Table View") {
+                        docMode = (docMode == .table ? .documents : .table)
+                        container.notifyUpdate()
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.adaptive(light: Color(white: 0.94), dark: Color(white: 0.2)))
+            }
+
+            if pager.hasDocuments && docMode != .table {
                 documentListView
             } else {
                 resultGridView
@@ -135,6 +169,18 @@ private struct TableDataView: View {
 
             paginationFooter
         }
+    }
+
+    private func slowSortBanner(column: String) -> some View {
+        HStack {
+            Text("🐢 No index starts with “\(column)”, so every page scans the whole table.")
+                .font(.caption)
+                .foregroundColor(Color.hex(0x856404))
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color.adaptive(light: Color.hex(0xFFF3CD), dark: Color.hex(0x332701)))
     }
 
     private var stagedBanner: some View {
@@ -222,6 +268,12 @@ private struct TableDataView: View {
                 .font(.caption)
                 .foregroundColor(Color(white: 0.5))
 
+            if let ms = pager.elapsedMs {
+                Text("⚡ \(ms) ms")
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.6))
+            }
+
             Button("Next ▶") {
                 Task {
                     await pager.next()
@@ -230,6 +282,20 @@ private struct TableDataView: View {
             }
 
             Spacer()
+
+            Button("📋 CSV") {
+                #if os(macOS)
+                AppKit.NSPasteboard.general.clearContents()
+                AppKit.NSPasteboard.general.setString(pager.exportCSV(), forType: .string)
+                #endif
+            }
+
+            Button("📋 JSON") {
+                #if os(macOS)
+                AppKit.NSPasteboard.general.clearContents()
+                AppKit.NSPasteboard.general.setString(pager.exportJSON(pretty: true), forType: .string)
+                #endif
+            }
 
             if pager.isLoading {
                 Text("Loading...")
@@ -244,6 +310,8 @@ private struct TableDataView: View {
 }
 
 private struct TableStructureView: View {
+    let container: AppStateContainer
+    let workspace: WorkspaceModel
     let tab: TableTabModel
 
     var body: some View {
@@ -270,6 +338,18 @@ private struct TableStructureView: View {
                                 .font(.caption)
                                 .foregroundColor(Color.hex(0x007ACC))
                                 .frame(minWidth: 180, alignment: .leading)
+                            if workspace.config.kind.isSQL && node.kind == .column {
+                                Button("✏️ Change Type") {
+                                    let typeName = (node.detail ?? "").components(separatedBy: " · ").first ?? ""
+                                    workspace.presentChangeColumnType(
+                                        column: node.name,
+                                        currentType: typeName,
+                                        tablePath: tab.path,
+                                        tableName: tab.title
+                                    )
+                                    container.notifyUpdate()
+                                }
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -284,6 +364,9 @@ private struct TableStructureView: View {
         HStack(spacing: 12) {
             Text("Name").font(.caption).frame(minWidth: 160, alignment: .leading)
             Text("Type / Details").font(.caption).frame(minWidth: 180, alignment: .leading)
+            if workspace.config.kind.isSQL {
+                Text("Action").font(.caption).frame(minWidth: 100, alignment: .leading)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -309,5 +392,50 @@ private struct TableDDLView: View {
                 }
             }
         }
+    }
+}
+
+private struct TableIndexesView: View {
+    let tab: TableTabModel
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            VStack(alignment: .leading, spacing: 0) {
+                indexesHeader
+
+                if tab.indexes.isEmpty {
+                    Text("No indexes defined for this collection or table.")
+                        .font(.body)
+                        .foregroundColor(Color(white: 0.5))
+                        .padding(16)
+                } else {
+                    ForEach(tab.indexes, id: \.name) { index in
+                        HStack(spacing: 12) {
+                            Text(index.name)
+                                .font(.system(size: 13, design: .monospaced))
+                                .frame(minWidth: 160, alignment: .leading)
+
+                            Text(index.detail ?? "")
+                                .font(.caption)
+                                .foregroundColor(Color(white: 0.6))
+                                .frame(minWidth: 240, alignment: .leading)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.adaptive(light: Color(white: 0.98), dark: Color(white: 0.16)))
+                    }
+                }
+            }
+        }
+    }
+
+    private var indexesHeader: some View {
+        HStack(spacing: 12) {
+            Text("Index Name").font(.caption).frame(minWidth: 160, alignment: .leading)
+            Text("Keys & Properties").font(.caption).frame(minWidth: 240, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.adaptive(light: Color(white: 0.88), dark: Color(white: 0.22)))
     }
 }

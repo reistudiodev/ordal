@@ -157,6 +157,12 @@ public final class QueryTabModel: Identifiable {
         history = (try? manager.history(id: config.id, limit: 200)) ?? []
     }
 
+    /// Clears both in-memory history (saving memory) and the persisted history file.
+    public func clearHistory() {
+        history.removeAll()
+        try? manager.clearHistory(id: config.id)
+    }
+
     public func format() {
         guard config.kind.isSQL else { return }
         if selection.length > 0, NSMaxRange(selection) <= (text as NSString).length {

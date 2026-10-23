@@ -58,6 +58,54 @@ public struct OrdalRootView: View {
                     }
                 }
             }
+
+            // Export Modal Dialog Overlay
+            if let workspace = app.activeWorkspace,
+               let target = workspace.exportTarget {
+                dialogBackdrop {
+                    ExportDialog(
+                        container: container,
+                        workspace: workspace,
+                        target: target,
+                        onDismiss: {
+                            workspace.dismissExport()
+                            container.notifyUpdate()
+                        }
+                    )
+                }
+            }
+
+            // Rename Modal Dialog Overlay
+            if let workspace = app.activeWorkspace,
+               let target = workspace.renameTarget {
+                dialogBackdrop {
+                    RenameDialog(
+                        container: container,
+                        workspace: workspace,
+                        target: target,
+                        onDismiss: {
+                            workspace.dismissRename()
+                            container.notifyUpdate()
+                        }
+                    )
+                }
+            }
+
+            // Change Column Type Modal Dialog Overlay
+            if let workspace = app.activeWorkspace,
+               let target = workspace.columnTypeTarget {
+                dialogBackdrop {
+                    ChangeColumnTypeDialog(
+                        container: container,
+                        workspace: workspace,
+                        target: target,
+                        onDismiss: {
+                            workspace.dismissChangeColumnType()
+                            container.notifyUpdate()
+                        }
+                    )
+                }
+            }
         }
     }
 

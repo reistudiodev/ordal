@@ -120,6 +120,24 @@ private struct NodeLabel: View {
             if let path = workspace.relationsPath(for: node) {
                 Button("View Relations") { workspace.openSchema(path: path) }
             }
+            Divider()
+            if node.opensAsTable {
+                Button(node.kind == .collection ? "Export Collection…" : (node.kind == .view ? "Export View…" : "Export Table…")) {
+                    workspace.presentExport(for: node)
+                }
+                Button(node.kind == .collection ? "Rename Collection…" : (node.kind == .view ? "Rename View…" : "Rename Table…")) {
+                    workspace.presentRename(for: node)
+                }
+            }
+            if node.kind == .database || node.kind == .schema {
+                Button(node.kind == .database ? "Export Database…" : "Export Schema…") {
+                    workspace.presentExport(for: node)
+                }
+                Button(node.kind == .database ? "Rename Database…" : "Rename Schema…") {
+                    workspace.presentRename(for: node)
+                }
+            }
+            Divider()
             Button("Copy Name") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(node.name, forType: .string)

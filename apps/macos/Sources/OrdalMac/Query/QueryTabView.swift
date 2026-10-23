@@ -144,6 +144,32 @@ private struct ResultsPane: View {
                         Text("\(pager.rowCount.formatted()) \(pager.rowCount == 1 ? "document" : "documents")\(pager.isDone ? "" : "…")")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Menu {
+                            Button {
+                                ExportHelper.saveFile(content: pager.exportCSV(), defaultName: tab.title, fileExtension: "csv")
+                            } label: {
+                                Label("Export as CSV…", systemImage: "tablecells")
+                            }
+                            Button {
+                                ExportHelper.saveFile(content: pager.exportJSON(pretty: true), defaultName: tab.title, fileExtension: "json")
+                            } label: {
+                                Label("Export as JSON…", systemImage: "curlybraces")
+                            }
+                            Divider()
+                            Button {
+                                ExportHelper.copy(text: pager.exportCSV())
+                            } label: {
+                                Label("Copy CSV to Clipboard", systemImage: "doc.on.doc")
+                            }
+                            Button {
+                                ExportHelper.copy(text: pager.exportJSON(pretty: true))
+                            } label: {
+                                Label("Copy JSON to Clipboard", systemImage: "doc.on.doc.fill")
+                            }
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .menuStyle(.borderlessButton)
                     }
                     .controlSize(.small)
                     .padding(.horizontal, Space.s)
@@ -156,7 +182,7 @@ private struct ResultsPane: View {
                                     workspace.inspected = .init(column: pager.columns[col], value: r.cells[col], row: row, columnIndex: col)
                                 }
                             },
-                            onSortColumn: nil
+                            onSortColumn: { pager.toggleSort(column: $0) }
                         )
                     } else {
                         DocumentList(count: pager.rowCount, mode: docMode, document: pager.document(at:), version: version)
@@ -169,7 +195,7 @@ private struct ResultsPane: View {
                                 workspace.inspected = .init(column: pager.columns[col], value: r.cells[col], row: row, columnIndex: col)
                             }
                         },
-                        onSortColumn: pager.canSort ? { pager.toggleSort(column: $0) } : nil
+                        onSortColumn: { pager.toggleSort(column: $0) }
                     )
                     if pager.isTruncated {
                         Text("Showing the first \(CursorPager.defaultCap.formatted()) rows. Add a LIMIT or filter to see the rest.")
@@ -197,10 +223,25 @@ private struct ResultsPane: View {
 
 private struct HistoryDrawer: View {
     let tab: QueryTabModel
+    @State private var confirmingClear = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("History").font(.headline).padding(Space.s)
+            HStack {
+                Text("History").font(.headline)
+                Spacer()
+                if !tab.history.isEmpty {
+                    Button(role: .destructive) {
+                        confirmingClear = true
+                    } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Clear query history to save memory")
+                }
+            }
+            .padding(Space.s)
             Divider()
             if tab.history.isEmpty {
                 ContentUnavailableView("No history yet", systemImage: "clock", description: Text("Queries you run on this connection appear here."))
@@ -225,6 +266,14 @@ private struct HistoryDrawer: View {
                 }
             }
         }
+        .confirmationDialog("Clear Query History?", isPresented: $confirmingClear) {
+            Button("Clear All History", role: .destructive) {
+                tab.clearHistory()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove all saved query history for this connection and free memory.")
+        }
     }
 }
 
@@ -241,6 +290,38 @@ private struct ResultSummary: View {
                 Spacer()
                 if let pager = tab.pager {
                     let _ = pager.version
+                    if !pager.columns.isEmpty {
+                        Menu {
+                            Button {
+                                ExportHelper.saveFile(content: pager.exportCSV(), defaultName: tab.title, fileExtension: "csv")
+                            } label: {
+                                Label("Export as CSV…", systemImage: "tablecells")
+                            }
+                            Button {
+                                ExportHelper.saveFile(content: pager.exportJSON(pretty: true), defaultName: tab.title, fileExtension: "json")
+                            } label: {
+                                Label("Export as JSON…", systemImage: "curlybraces")
+                            }
+                            Divider()
+                            Button {
+                                ExportHelper.copy(text: pager.exportCSV())
+                            } label: {
+                                Label("Copy CSV to Clipboard", systemImage: "doc.on.doc")
+                            }
+                            Button {
+                                ExportHelper.copy(text: pager.exportJSON(pretty: true))
+                            } label: {
+                                Label("Copy JSON to Clipboard", systemImage: "doc.on.doc.fill")
+                            }
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .disabled(pager.rowCount == 0)
+
+                        Divider().frame(height: 12)
+                    }
+
                     Label(Self.duration(pager.elapsedMs), systemImage: "stopwatch")
                         .help(tab.isRunning ? "Running for" : "Execution time (until the last row arrived)")
                         .monospacedDigit()

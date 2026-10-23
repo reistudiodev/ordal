@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "OrdalLinux",
+    platforms: [.macOS(.v14)],
     dependencies: [
         .package(path: "../../swift"),
         .package(path: "../shared"),

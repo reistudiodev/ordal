@@ -59,6 +59,11 @@ public final class WorkspaceModel: Identifiable {
     public private(set) var serverInfo: ServerInfo?
     public private(set) var latencyMs: Double?
     public var inspected: InspectedCell?
+    public var exportTarget: ExportTarget?
+    public var isExporting = false
+    public var exportProgress: String?
+    public var renameTarget: RenameTarget?
+    public var columnTypeTarget: ColumnTypeTarget?
 
     private let manager: ConnectionManager
     private var queryCounter = 0
@@ -227,6 +232,129 @@ public final class WorkspaceModel: Identifiable {
         case .postgres, .mySql, .mongoDb, .redis: path.first
         case .sqlite: nil
         }
+    }
+
+    // MARK: - Export
+    public func presentExport(for node: TreeNode) {
+        let kind: ExportTarget.Kind
+        switch node.kind {
+        case .table: kind = .table
+        case .view: kind = .view
+        case .collection: kind = .collection
+        case .database: kind = .database
+        case .schema: kind = .schema
+        default: return
+        }
+        exportTarget = ExportTarget(name: node.name, path: node.path, kind: kind)
+    }
+
+    public func presentExport(name: String, path: [String], kind: ExportTarget.Kind) {
+        exportTarget = ExportTarget(name: name, path: path, kind: kind)
+    }
+
+    public func dismissExport() {
+        exportTarget = nil
+        isExporting = false
+        exportProgress = nil
+    }
+
+    // MARK: - Rename
+    public func presentRename(for node: TreeNode) {
+        let kind: RenameTarget.Kind
+        switch node.kind {
+        case .table: kind = .table
+        case .view: kind = .view
+        case .collection: kind = .collection
+        case .database: kind = .database
+        case .schema: kind = .schema
+        default: return
+        }
+        renameTarget = RenameTarget(name: node.name, path: node.path, kind: kind)
+    }
+
+    public func presentRename(name: String, path: [String], kind: RenameTarget.Kind) {
+        renameTarget = RenameTarget(name: name, path: path, kind: kind)
+    }
+
+    public func dismissRename() {
+        renameTarget = nil
+    }
+
+    public func renameNode(target: RenameTarget, to newName: String) async throws {
+        try await SchemaManager.executeRename(
+            session: session,
+            engine: config.kind,
+            target: target,
+            newName: newName
+        )
+
+        // Compute new path
+        var newPath = target.path
+        if !newPath.isEmpty {
+            newPath[newPath.count - 1] = newName
+        }
+
+        // Update any open table tab matching this path
+        for tab in tabs {
+            if case .table(let t) = tab, t.path == target.path {
+                await t.updatePath(newPath)
+            }
+        }
+
+        // Refresh object browser
+        if target.path.count > 1 {
+            let parentPath = Array(target.path.dropLast())
+            if let parentNode = browser.loadedNodes.first(where: { $0.path == parentPath }) {
+                await browser.load(parentNode, force: true)
+            } else {
+                await browser.loadRoots()
+            }
+        } else {
+            await browser.loadRoots()
+        }
+
+        dismissRename()
+    }
+
+    // MARK: - Change Column Type
+    public func presentChangeColumnType(column: String, currentType: String, tablePath: [String], tableName: String) {
+        columnTypeTarget = ColumnTypeTarget(column: column, currentType: currentType, tablePath: tablePath, tableName: tableName)
+    }
+
+    public func dismissChangeColumnType() {
+        columnTypeTarget = nil
+    }
+
+    public func changeColumnType(target: ColumnTypeTarget, newType: String) async throws {
+        var tableMeta: TableMeta? = nil
+        var matchingTab: TableTabModel? = nil
+        for tab in tabs {
+            if case .table(let t) = tab, t.path == target.tablePath {
+                matchingTab = t
+                tableMeta = t.pager.meta
+                break
+            }
+        }
+
+        if tableMeta == nil {
+            tableMeta = try? await session.tableMeta(path: target.tablePath)
+        }
+
+        try await SchemaManager.alterColumnType(
+            session: session,
+            engine: config.kind,
+            path: target.tablePath,
+            column: target.column,
+            newType: newType,
+            tableMeta: tableMeta
+        )
+
+        if let matchingTab {
+            await matchingTab.pager.refresh()
+            await matchingTab.loadStructure()
+        }
+
+        dismissChangeColumnType()
     }
 
     func close() async {

@@ -62,14 +62,14 @@ public struct ResultGrid: View {
             }
         } else {
             VStack(spacing: 0) {
-                GridHeaderView(
-                    columns: columnsIndexed,
-                    sort: source.sort,
-                    onSortColumn: onSortColumn
-                )
-
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 1) {
+                        GridHeaderView(
+                            columns: columnsIndexed,
+                            sort: source.sort,
+                            onSortColumn: onSortColumn
+                        )
+
                         if source.rowCount == 0 {
                             HStack {
                                 Text("(0 rows returned)")
@@ -118,26 +118,29 @@ private struct GridHeaderView: View {
     let onSortColumn: ((String) -> Void)?
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 1) {
-                ForEach(columns, id: \.id) { colItem in
-                    let col = colItem.column
-                    let isSorted = sort?.column == col.name
-                    let sortArrow = isSorted ? (sort?.descending == true ? " ↓" : " ↑") : ""
+        HStack(spacing: 1) {
+            ForEach(columns, id: \.id) { colItem in
+                let col = colItem.column
+                let isSorted = sort?.column == col.name
+                let sortArrow = isSorted ? (sort?.descending == true ? " ▼" : " ▲") : ""
 
-                    Button("\(col.name)\(sortArrow)") {
-                        onSortColumn?(col.name)
-                    }
-                    .frame(minWidth: 120, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        Color.adaptive(
+                Button("\(col.name)\(sortArrow)") {
+                    onSortColumn?(col.name)
+                }
+                .frame(minWidth: 120, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    isSorted
+                        ? Color.adaptive(
+                            light: Color(white: 0.76),
+                            dark: Color(white: 0.32)
+                        )
+                        : Color.adaptive(
                             light: Color(white: 0.88),
                             dark: Color(white: 0.22)
                         )
-                    )
-                }
+                )
             }
         }
     }

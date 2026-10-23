@@ -118,6 +118,20 @@ private struct TreeNodeRow: View {
                         .font(.caption)
                         .foregroundColor(Color(white: 0.4))
                 }
+
+                if node.opensAsTable || node.kind == .database || node.kind == .schema {
+                    Button("📤") {
+                        workspace.presentExport(for: node)
+                        container.notifyUpdate()
+                    }
+                    .font(.caption)
+
+                    Button("✏️") {
+                        workspace.presentRename(for: node)
+                        container.notifyUpdate()
+                    }
+                    .font(.caption)
+                }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -200,6 +214,19 @@ private struct FlatNodeRow: View {
                 Text(node.path.dropLast().joined(separator: " › "))
                     .font(.caption)
                     .foregroundColor(Color(white: 0.5))
+            }
+            if node.opensAsTable || node.kind == .database || node.kind == .schema {
+                Button("📤") {
+                    workspace.presentExport(for: node)
+                    container.notifyUpdate()
+                }
+                .font(.caption)
+
+                Button("✏️") {
+                    workspace.presentRename(for: node)
+                    container.notifyUpdate()
+                }
+                .font(.caption)
             }
         }
         .padding(.horizontal, 8)

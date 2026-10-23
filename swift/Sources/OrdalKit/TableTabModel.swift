@@ -8,19 +8,21 @@ public final class TableTabModel: Identifiable {
     public enum Segment: String, CaseIterable, Identifiable {
         case data = "Data"
         case structure = "Structure"
+        case indexes = "Indexes"
         case ddl = "DDL"
         case query = "Query"
         public var id: String { rawValue }
     }
 
     public let id = UUID()
-    public let path: [String]
+    public private(set) var path: [String]
     public let kind: NodeKind
     public var segment: Segment = .data
     public let pager: TablePager
     /// The Query segment's editor, prefilled for this table.
     public let query: QueryTabModel
     public private(set) var structure: [BrowseNode] = []
+    public private(set) var indexes: [BrowseNode] = []
     public private(set) var ddl = ""
     public private(set) var structureError: String?
 
@@ -39,7 +41,10 @@ public final class TableTabModel: Identifiable {
     public var title: String { path.last ?? "table" }
 
     public var segments: [Segment] {
-        session.config().kind.isSQL ? Segment.allCases : [.data, .structure, .query]
+        if session.config().kind == .mongoDb {
+            return [.data, .structure, .indexes, .query]
+        }
+        return session.config().kind.isSQL ? [.data, .structure, .indexes, .ddl, .query] : [.data, .structure, .indexes, .query]
     }
 
     public func start() async {
@@ -53,17 +58,47 @@ public final class TableTabModel: Identifiable {
         query.session = session
     }
 
+    /// Updates relation path and refreshes pager and structure when table is renamed.
+    public func updatePath(_ newPath: [String]) async {
+        self.path = newPath
+        pager.updatePath(newPath)
+        await pager.refresh()
+        await loadStructure()
+    }
+
+    /// Alters a column's data type, refreshes pager data, metadata, and the structure tab.
+    public func changeColumnType(column: String, newType: String) async throws {
+        try await SchemaManager.alterColumnType(
+            session: session,
+            engine: session.config().kind,
+            path: path,
+            column: column,
+            newType: newType,
+            tableMeta: pager.meta
+        )
+        await pager.refresh()
+        await loadStructure()
+    }
+
     public func loadStructure() async {
         do {
-            structure = try await session.listChildren(path: path)
+            let rawChildren = try await session.listChildren(path: path)
+            if session.config().kind == .mongoDb {
+                // In MongoDB, listChildren returns index nodes
+                indexes = rawChildren
+                if let meta = pager.meta {
+                    structure = meta.columns.map { BrowseNode(name: $0.name, kind: .column, hasChildren: false, detail: $0.typeName) }
+                } else {
+                    structure = []
+                }
+            } else {
+                indexes = rawChildren.filter { $0.kind == .index }
+                structure = rawChildren.filter { $0.kind != .index }
+            }
             ddl = makeDDL()
             structureError = nil
         } catch {
             structureError = describe(error)
-        }
-        // MongoDB browse children are indexes; show the sampled fields instead.
-        if session.config().kind == .mongoDb, let meta = pager.meta {
-            structure = meta.columns.map { BrowseNode(name: $0.name, kind: .column, hasChildren: false, detail: $0.typeName) }
         }
     }
 

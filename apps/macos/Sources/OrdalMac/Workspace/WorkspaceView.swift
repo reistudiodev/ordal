@@ -9,6 +9,7 @@ struct WorkspaceView: View {
 
     var body: some View {
         @Bindable var app = app
+        @Bindable var workspace = workspace
         NavigationSplitView {
             HStack(spacing: 0) {
                 ConnectionRail()
@@ -34,6 +35,26 @@ struct WorkspaceView: View {
         .environmentEdge(workspace.config)
         .navigationTitle(workspace.config.name)
         .navigationSubtitle(subtitle)
+        .background {
+            WindowAccessor { window in
+                window.titlebarSeparatorStyle = .none
+            }
+        }
+        .sheet(item: $workspace.exportTarget) { target in
+            ExportDialogSheet(workspace: workspace, target: target) {
+                workspace.dismissExport()
+            }
+        }
+        .sheet(item: $workspace.renameTarget) { target in
+            RenameDialogSheet(workspace: workspace, target: target) {
+                workspace.dismissRename()
+            }
+        }
+        .sheet(item: $workspace.columnTypeTarget) { target in
+            ChangeColumnTypeSheet(workspace: workspace, target: target) {
+                workspace.dismissChangeColumnType()
+            }
+        }
         .task(id: workspace.id) {
             // Keep the latency in the status bar fresh without being chatty.
             while !Task.isCancelled {
@@ -185,5 +206,25 @@ private struct EnvironmentEdge: ViewModifier {
 extension View {
     func environmentEdge(_ config: ConnectionConfig) -> some View {
         modifier(EnvironmentEdge(config: config))
+    }
+}
+
+private struct WindowAccessor: NSViewRepresentable {
+    let configure: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                configure(window)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let window = nsView.window {
+            configure(window)
+        }
     }
 }

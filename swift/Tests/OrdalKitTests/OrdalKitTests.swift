@@ -207,6 +207,12 @@ final class OrdalKitTests: XCTestCase {
         XCTAssertEqual(tab.pager?.rowCount, 3)
         XCTAssertEqual(tab.pager?.columns.map(\.name), ["id", "name"])
         XCTAssertEqual(tab.history.first?.query, "SELECT * FROM items ORDER BY id")
+
+        // Clearing history clears in-memory and persisted history to save memory
+        tab.clearHistory()
+        XCTAssertTrue(tab.history.isEmpty)
+        tab.loadHistory()
+        XCTAssertTrue(tab.history.isEmpty)
     }
 
     func testRunSelectionOnly() async throws {
@@ -302,9 +308,40 @@ final class OrdalKitTests: XCTestCase {
         let pager = CursorPager(cursor: try ws.session.query(query: "SELECT id, name FROM items", database: nil))
         await pager.start()
         XCTAssertTrue(pager.canSort)
+
+        // 1st click: Ascending
         pager.toggleSort(column: "id")
+        XCTAssertEqual(pager.sort?.column, "id")
+        XCTAssertEqual(pager.sort?.descending, false)
+        XCTAssertEqual(pager.row(at: 0)?.cells.first, .int(v: 1))
+        XCTAssertEqual(pager.row(at: 19)?.cells.first, .int(v: 20))
+
+        // 2nd click: Descending
         pager.toggleSort(column: "id")
+        XCTAssertEqual(pager.sort?.column, "id")
+        XCTAssertEqual(pager.sort?.descending, true)
         XCTAssertEqual(pager.row(at: 0)?.cells.first, .int(v: 20))
+        XCTAssertEqual(pager.row(at: 19)?.cells.first, .int(v: 1))
+
+        // Export reflects descending order
+        let csv = pager.exportCSV()
+        let lines = csv.components(separatedBy: "\r\n")
+        XCTAssertTrue(lines.count > 2)
+        XCTAssertTrue(lines[1].starts(with: "20,"))
+
+        // 3rd click: Reset to natural order
+        pager.toggleSort(column: "id")
+        XCTAssertNil(pager.sort)
+        XCTAssertEqual(pager.row(at: 0)?.cells.first, .int(v: 1))
+
+        // Sort by name descending
+        pager.toggleSort(column: "name")
+        XCTAssertEqual(pager.sort?.column, "name")
+        XCTAssertEqual(pager.sort?.descending, false)
+        pager.toggleSort(column: "name")
+        XCTAssertEqual(pager.sort?.descending, true)
+        XCTAssertEqual(pager.row(at: 0)?.cells[1], .text(v: "item 20"))
+        XCTAssertEqual(pager.row(at: 19)?.cells[1], .text(v: "item 1"))
     }
 
     func testCellValueParser() {
@@ -539,5 +576,237 @@ final class OrdalKitTests: XCTestCase {
         XCTAssertEqual(palette.results.map(\.id), ["b"])
         XCTAssertTrue(palette.runSelected())
         XCTAssertEqual(ran, "b")
+    }
+
+    func testDataExporterCSVAndJSON() {
+        let cols = [
+            ColumnInfo(name: "id", typeName: "INTEGER", kind: .int),
+            ColumnInfo(name: "name", typeName: "TEXT", kind: .text),
+            ColumnInfo(name: "meta", typeName: "JSON", kind: .json)
+        ]
+        let rows = [
+            Row(cells: [.int(v: 1), .text(v: "Alice, Developer"), .json(v: "{\"role\":\"admin\"}")]),
+            Row(cells: [.int(v: 2), .text(v: "Bob \"The Builder\""), .null])
+        ]
+
+        let csv = DataExporter.csv(columns: cols, rows: rows)
+        XCTAssertTrue(csv.contains("id,name,meta"))
+        XCTAssertTrue(csv.contains("1,\"Alice, Developer\",\"{\"\"role\"\":\"\"admin\"\"}\""))
+        XCTAssertTrue(csv.contains("2,\"Bob \"\"The Builder\"\"\""))
+
+        let json = DataExporter.json(columns: cols, rows: rows, pretty: false)
+        XCTAssertTrue(json.contains("\"id\":1"))
+        XCTAssertTrue(json.contains("\"name\":\"Alice, Developer\""))
+        XCTAssertTrue(json.contains("\"role\":\"admin\""))
+        XCTAssertTrue(json.contains("\"name\":\"Bob \\\"The Builder\\\"\""))
+    }
+
+    func testDataExporterSQLInsertsAndDDL() {
+        let cols = [
+            ColumnInfo(name: "id", typeName: "INTEGER", kind: .int),
+            ColumnInfo(name: "name", typeName: "TEXT", kind: .text),
+            ColumnInfo(name: "active", typeName: "BOOLEAN", kind: .bool)
+        ]
+        let rows = [
+            Row(cells: [.int(v: 1), .text(v: "Alice's Pizza"), .bool(v: true)]),
+            Row(cells: [.int(v: 2), .text(v: "Bob"), .bool(v: false)])
+        ]
+
+        let sql = DataExporter.sqlInserts(table: "users", columns: cols, rows: rows, engine: .postgres, batchSize: 100)
+        XCTAssertTrue(sql.contains("INSERT INTO \"users\" (\"id\", \"name\", \"active\") VALUES"))
+        XCTAssertTrue(sql.contains("(1, 'Alice''s Pizza', TRUE)"))
+        XCTAssertTrue(sql.contains("(2, 'Bob', FALSE)"))
+
+        let meta = TableMeta(
+            columns: [
+                ColumnMeta(name: "id", typeName: "integer", kind: .int, nullable: false, isKey: true, hasDefault: false, enumValues: [], editable: false, indexed: true),
+                ColumnMeta(name: "email", typeName: "text", kind: .text, nullable: false, isKey: false, hasDefault: false, enumValues: [], editable: true, indexed: true)
+            ],
+            paging: .keyset,
+            keyColumns: ["id"],
+            editable: true,
+            readOnlyReason: nil
+        )
+
+        let ddl = DataExporter.createTableDDL(table: "users", meta: meta, engine: .postgres)
+        XCTAssertTrue(ddl.contains("CREATE TABLE \"users\" ("))
+        XCTAssertTrue(ddl.contains("\"id\" integer NOT NULL"))
+        XCTAssertTrue(ddl.contains("\"email\" text NOT NULL"))
+        XCTAssertTrue(ddl.contains("PRIMARY KEY (\"id\")"))
+
+        let mongoScript = DataExporter.mongoCollectionScript(
+            collection: "customers",
+            indexes: [BrowseNode(name: "email_1", kind: .index, hasChildren: false, detail: "unique: true")],
+            rows: [Row(cells: [.json(v: "{\"_id\":\"123\",\"name\":\"Alice\"}")])],
+            includeStructure: true,
+            includeData: true
+        )
+        XCTAssertTrue(mongoScript.contains("db.createCollection(\"customers\");"))
+        XCTAssertTrue(mongoScript.contains("db.customers.insertMany(["))
+        XCTAssertTrue(mongoScript.contains("{\"_id\":\"123\",\"name\":\"Alice\"}"))
+    }
+
+    func testDatabaseExporterSingleTableAndDatabase() async throws {
+        let (_, ws) = try await openWorkspace(rows: 2)
+
+        // 1. Find exportable relations in sqlite database "main"
+        let relations = try await ExportService.findExportableRelations(session: ws.session, rootPath: ["main"])
+        XCTAssertTrue(relations.contains { $0.name == "items" && $0.kind == .table })
+
+        // 2. Export single table: Structure only
+        let targetTable = ExportTarget(name: "items", path: ["main", "Tables", "items"], kind: .table)
+        let structureOnlyOpts = ExportOptions(content: .structureOnly, format: .sql, limit: .hundred)
+        let structureSQL = try await ExportService.export(session: ws.session, engine: .sqlite, target: targetTable, options: structureOnlyOpts)
+        XCTAssertTrue(structureSQL.contains("CREATE TABLE \"items\""))
+        XCTAssertFalse(structureSQL.contains("INSERT INTO"))
+
+        // 3. Export single table: Data only
+        let dataOnlyOpts = ExportOptions(content: .dataOnly, format: .sql, limit: .hundred)
+        let dataSQL = try await ExportService.export(session: ws.session, engine: .sqlite, target: targetTable, options: dataOnlyOpts)
+        XCTAssertFalse(dataSQL.contains("CREATE TABLE"))
+        XCTAssertTrue(dataSQL.contains("INSERT INTO \"items\""))
+        XCTAssertTrue(dataSQL.contains("'item 1'"))
+
+        // 4. Export single table: Both (Structure + Data)
+        let bothOpts = ExportOptions(content: .both, format: .sql, limit: .hundred)
+        let bothSQL = try await ExportService.export(session: ws.session, engine: .sqlite, target: targetTable, options: bothOpts)
+        XCTAssertTrue(bothSQL.contains("CREATE TABLE \"items\""))
+        XCTAssertTrue(bothSQL.contains("INSERT INTO \"items\""))
+
+        // 5. Export entire database "main": Both (Full Backup)
+        let targetDB = ExportTarget(name: "main", path: ["main"], kind: .database)
+        let dbBackupSQL = try await ExportService.export(session: ws.session, engine: .sqlite, target: targetDB, options: bothOpts)
+        XCTAssertTrue(dbBackupSQL.contains("Database / Schema Backup: main"))
+        XCTAssertTrue(dbBackupSQL.contains("Object: items (table)"))
+        XCTAssertTrue(dbBackupSQL.contains("CREATE TABLE \"items\""))
+        XCTAssertTrue(dbBackupSQL.contains("INSERT INTO \"items\""))
+
+        // 6. Export database as JSON
+        let dbJSONOpts = ExportOptions(content: .both, format: .json, limit: .hundred)
+        let dbJSON = try await ExportService.export(session: ws.session, engine: .sqlite, target: targetDB, options: dbJSONOpts)
+        XCTAssertTrue(dbJSON.contains("\"database\" : \"main\""))
+        XCTAssertTrue(dbJSON.contains("\"items\" : {"))
+        XCTAssertTrue(dbJSON.contains("\"data\" : ["))
+    }
+
+    func testSchemaManagerRename() async throws {
+        // 1. Verify SQL generation for each engine
+        let sqliteTarget = RenameTarget(name: "items", path: ["main", "Tables", "items"], kind: .table)
+        let (sqliteSQL, _) = try SchemaManager.renameSQL(engine: .sqlite, target: sqliteTarget, newName: "products")
+        XCTAssertEqual(sqliteSQL, "ALTER TABLE \"items\" RENAME TO \"products\";")
+
+        let pgTarget = RenameTarget(name: "items", path: ["app_db", "public", "Tables", "items"], kind: .table)
+        let (pgSQL, pgDB) = try SchemaManager.renameSQL(engine: .postgres, target: pgTarget, newName: "products")
+        XCTAssertEqual(pgSQL, "ALTER TABLE \"public\".\"items\" RENAME TO \"products\";")
+        XCTAssertEqual(pgDB, "app_db")
+
+        let mySqlTarget = RenameTarget(name: "items", path: ["app_db", "Tables", "items"], kind: .table)
+        let (mySqlSQL, _) = try SchemaManager.renameSQL(engine: .mySql, target: mySqlTarget, newName: "products")
+        XCTAssertEqual(mySqlSQL, "RENAME TABLE `items` TO `products`;")
+
+        let mongoTarget = RenameTarget(name: "customers", path: ["mydb", "customers"], kind: .collection)
+        let (mongoCmd, mongoDB) = try SchemaManager.renameSQL(engine: .mongoDb, target: mongoTarget, newName: "clients")
+        XCTAssertEqual(mongoCmd, "{\"renameCollection\": \"mydb.customers\", \"to\": \"mydb.clients\"}")
+        XCTAssertEqual(mongoDB, "admin")
+
+        // 2. Test live rename in SQLite workspace
+        let (_, ws) = try await openWorkspace(rows: 3)
+        let target = RenameTarget(name: "items", path: ["main", "Tables", "items"], kind: .table)
+
+        // Open table tab before rename
+        ws.openTable(path: target.path, kind: .table)
+        let tableTab = try XCTUnwrap(ws.activeTable)
+        XCTAssertEqual(tableTab.title, "items")
+
+        // Execute rename to "inventory"
+        try await ws.renameNode(target: target, to: "inventory")
+
+        // Verify open tab updated its path and title seamlessly
+        XCTAssertEqual(tableTab.title, "inventory")
+        XCTAssertEqual(tableTab.path, ["main", "Tables", "inventory"])
+
+        // Verify querying new table name returns data
+        let queryTab = ws.newQueryTab(text: "SELECT * FROM inventory")
+        await queryTab.run()
+        XCTAssertEqual(queryTab.status, .finished)
+        XCTAssertEqual(queryTab.pager?.rowCount, 3)
+    }
+
+    func testSQLTypeCatalogAndAlterColumnType() async throws {
+        // 1. Verify SQLTypeCatalog categories and types
+        let pgCategories = SQLTypeCatalog.categories(for: .postgres)
+        XCTAssertTrue(pgCategories.contains { $0.id == "text" })
+        XCTAssertTrue(pgCategories.contains { $0.id == "boolean" })
+        let pgTypes = SQLTypeCatalog.allTypes(for: .postgres)
+        XCTAssertTrue(pgTypes.contains("VARCHAR(255)"))
+        XCTAssertTrue(pgTypes.contains("BOOLEAN"))
+        XCTAssertTrue(pgTypes.contains("JSONB"))
+
+        let mySqlTypes = SQLTypeCatalog.allTypes(for: .mySql)
+        XCTAssertTrue(mySqlTypes.contains("VARCHAR(255)"))
+        XCTAssertTrue(mySqlTypes.contains("TINYINT(1)"))
+
+        let sqliteTypes = SQLTypeCatalog.allTypes(for: .sqlite)
+        XCTAssertTrue(sqliteTypes.contains("TEXT"))
+        XCTAssertTrue(sqliteTypes.contains("INTEGER"))
+        XCTAssertTrue(sqliteTypes.contains("BOOLEAN"))
+
+        // 2. Verify SQL Generation
+        let (pgSQL, pgDB) = try SchemaManager.alterColumnTypeSQL(
+            engine: .postgres,
+            path: ["mydb", "public", "Tables", "users"],
+            column: "active",
+            newType: "BOOLEAN"
+        )
+        XCTAssertEqual(pgSQL, "ALTER TABLE \"public\".\"users\" ALTER COLUMN \"active\" TYPE BOOLEAN USING \"active\"::BOOLEAN;")
+        XCTAssertEqual(pgDB, "mydb")
+
+        let (mySqlSQL, mySqlDB) = try SchemaManager.alterColumnTypeSQL(
+            engine: .mySql,
+            path: ["mydb", "Tables", "users"],
+            column: "active",
+            newType: "BOOLEAN"
+        )
+        XCTAssertEqual(mySqlSQL, "ALTER TABLE `users` MODIFY COLUMN `active` BOOLEAN;")
+        XCTAssertEqual(mySqlDB, "mydb")
+
+        // 3. Test altering column type in live SQLite database
+        let (_, ws) = try await openWorkspace(rows: 2)
+        let setup = try ws.session.query(query: """
+            CREATE TABLE products (id INTEGER PRIMARY KEY, title TEXT, price TEXT);
+            INSERT INTO products VALUES (1, 'Widget', '49.99'), (2, 'Gadget', '99.50');
+            """, database: nil)
+        _ = try await setup.nextPage(maxRows: 1)
+
+        let target = ColumnTypeTarget(
+            column: "price",
+            currentType: "TEXT",
+            tablePath: ["main", "Tables", "products"],
+            tableName: "products"
+        )
+
+        ws.openTable(path: target.tablePath, kind: .table)
+        let tab = try XCTUnwrap(ws.activeTable)
+        try await eventually("structure loaded") { !tab.structure.isEmpty }
+        let initialCol = try XCTUnwrap(tab.structure.first { $0.name == "price" })
+        XCTAssertEqual(initialCol.detail, "text")
+
+        // Change column "price" from TEXT to REAL
+        try await ws.changeColumnType(target: target, newType: "REAL")
+
+        // Verify structure updated
+        try await eventually("type updated to real") {
+            tab.structure.first { $0.name == "price" }?.detail == "real"
+        }
+
+        // Verify data preserved
+        XCTAssertEqual(tab.pager.rowCount, 2)
+        let row1 = try XCTUnwrap(tab.pager.row(at: 0))
+        XCTAssertEqual(row1.cells[1], .text(v: "Widget"))
+        if case .float(let val) = row1.cells[2] {
+            XCTAssertEqual(val, 49.99, accuracy: 0.01)
+        } else {
+            XCTFail("Expected float value for price, got \(row1.cells[2])")
+        }
     }
 }

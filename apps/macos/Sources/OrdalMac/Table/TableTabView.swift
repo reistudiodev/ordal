@@ -8,6 +8,7 @@ struct TableTabView: View {
     let workspace: WorkspaceModel
     @Environment(AppState.self) private var app
     @State private var reviewing = false
+    @State private var isReloading = false
     @AppStorage("mongoResultView") private var docMode: DocumentViewMode = .documents
 
     private var showsDocuments: Bool { tab.pager.hasDocuments && docMode != .table }
@@ -16,7 +17,13 @@ struct TableTabView: View {
         VStack(spacing: 0) {
             HStack(spacing: Space.s) {
                 Picker("View", selection: $tab.segment) {
-                    ForEach(tab.segments) { Text($0.rawValue).tag($0) }
+                    ForEach(tab.segments) { seg in
+                        if seg == .indexes && !tab.indexes.isEmpty {
+                            Text("Indexes (\(tab.indexes.count))").tag(seg)
+                        } else {
+                            Text(seg.rawValue).tag(seg)
+                        }
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -25,15 +32,63 @@ struct TableTabView: View {
                     DocumentModePicker(mode: $docMode)
                 }
                 Spacer()
+                if tab.segment == .data {
+                    Menu {
+                        Button {
+                            ExportHelper.saveFile(content: tab.pager.exportCSV(), defaultName: tab.title, fileExtension: "csv")
+                        } label: {
+                            Label("Export as CSV…", systemImage: "tablecells")
+                        }
+                        Button {
+                            ExportHelper.saveFile(content: tab.pager.exportJSON(pretty: true), defaultName: tab.title, fileExtension: "json")
+                        } label: {
+                            Label("Export as JSON…", systemImage: "curlybraces")
+                        }
+                        Divider()
+                        Button {
+                            ExportHelper.copy(text: tab.pager.exportCSV())
+                        } label: {
+                            Label("Copy CSV to Clipboard", systemImage: "doc.on.doc")
+                        }
+                        Button {
+                            ExportHelper.copy(text: tab.pager.exportJSON(pretty: true))
+                        } label: {
+                            Label("Copy JSON to Clipboard", systemImage: "doc.on.doc.fill")
+                        }
+                        Divider()
+                        Button {
+                            workspace.presentExport(
+                                name: tab.title,
+                                path: tab.path,
+                                kind: tab.kind == .collection ? .collection : .table
+                            )
+                        } label: {
+                            Label("Export Options (Structure / Backup)…", systemImage: "slider.horizontal.3")
+                        }
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                    .help("Export current page data as CSV or JSON")
+                }
                 if tab.segment != .query {
                     Button {
                         Task {
+                            isReloading = true
                             await tab.pager.refresh()
                             await tab.loadStructure()
+                            isReloading = false
                         }
                     } label: {
-                        Label("Reload", systemImage: "arrow.clockwise")
+                        if isReloading || tab.pager.isLoading {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.small)
+                                Text("Reloading…")
+                            }
+                        } else {
+                            Label("Reload", systemImage: "arrow.clockwise")
+                        }
                     }
+                    .disabled(isReloading || tab.pager.isLoading)
                     .help("Reload data and structure")
                 }
             }
@@ -45,6 +100,7 @@ struct TableTabView: View {
             switch tab.segment {
             case .data: data
             case .structure: structure
+            case .indexes: indexesView
             case .ddl: ddl
             case .query: QueryTabView(tab: tab.query, workspace: workspace)
             }
@@ -88,9 +144,6 @@ struct TableTabView: View {
                         }
                     }
                 )
-                .overlay(alignment: .top) {
-                    if pager.isLoading { ProgressView().controlSize(.small).padding(Space.s) }
-                }
             } else {
                 ResultGridView(
                     source: pager, version: version,
@@ -98,13 +151,36 @@ struct TableTabView: View {
                     onActivateCell: { _, _ in app.showInspector = true },
                     onSortColumn: { column in Task { await pager.toggleSort(column: column) } }
                 )
-                .overlay(alignment: .top) {
-                    if pager.isLoading { ProgressView().controlSize(.small).padding(Space.s) }
-                }
             }
             Divider()
             PaginationBar(pager: pager)
         }
+        .overlay(alignment: .top) {
+            if isReloading || pager.isLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(isReloading ? "Reloading table data…" : "Loading data…")
+                        .font(.caption.weight(.medium))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.92))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.accentColor.opacity(0.4), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 2)
+                .padding(.top, 10)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity
+                ))
+                .zIndex(99)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isReloading || pager.isLoading)
     }
 
     /// Top-level fields of a row with staged edits, and their new values.
@@ -128,6 +204,30 @@ struct TableTabView: View {
     private var structure: some View {
         if let error = tab.structureError {
             ContentUnavailableView("Could not load structure", systemImage: "exclamationmark.triangle", description: Text(error))
+        } else if workspace.config.kind.isSQL {
+            Table(tab.structure.map(StructureRow.init)) {
+                TableColumn("Name") { Text($0.name).font(.body.monospaced()) }
+                TableColumn("Kind") { Text($0.kind) }.width(min: 60, ideal: 80, max: 120)
+                TableColumn("Details") { Text($0.detail).font(.body.monospaced()).foregroundStyle(.secondary) }
+                TableColumn("Action") { row in
+                    if row.kind == "column" {
+                        Button {
+                            let typeName = row.detail.components(separatedBy: " · ").first ?? ""
+                            workspace.presentChangeColumnType(
+                                column: row.name,
+                                currentType: typeName,
+                                tablePath: tab.path,
+                                tableName: tab.title
+                            )
+                        } label: {
+                            Label("Change Type…", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
+                }
+                .width(min: 120, ideal: 140, max: 180)
+            }
         } else {
             Table(tab.structure.map(StructureRow.init)) {
                 TableColumn("Name") { Text($0.name).font(.body.monospaced()) }
@@ -200,6 +300,20 @@ private struct PaginationBar: View {
                       : "This relation has no key, so every page uses an offset.")
 
             Divider().frame(height: 14)
+            if pager.isLoading {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading…")
+                        .foregroundStyle(.secondary)
+                }
+                Divider().frame(height: 14)
+            } else if let ms = pager.elapsedMs {
+                Label("\(ms) ms", systemImage: "bolt.fill")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .help("Page fetch duration: \(ms) ms")
+                Divider().frame(height: 14)
+            }
             Text(rowsText).foregroundStyle(.secondary).monospacedDigit()
             if pager.count?.exact == false {
                 Button(pager.isCounting ? "Counting…" : "Count") { Task { await pager.refreshCount(exact: true) } }
@@ -271,5 +385,123 @@ private struct StructureRow: Identifiable {
         name = node.name
         kind = "\(node.kind)"
         detail = node.detail ?? ""
+    }
+}
+
+extension TableTabView {
+    @ViewBuilder
+    fileprivate var indexesView: some View {
+        if let error = tab.structureError {
+            ContentUnavailableView("Could not load indexes", systemImage: "exclamationmark.triangle", description: Text(error))
+        } else if tab.indexes.isEmpty {
+            ContentUnavailableView {
+                Label("No Indexes", systemImage: "text.magnifyingglass")
+            } description: {
+                Text("This collection or table has no secondary indexes.")
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Label("\(tab.indexes.count) \(tab.indexes.count == 1 ? "Index" : "Indexes") on \(tab.title)", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        .font(.headline)
+                    Spacer()
+                    Text("MongoDB Compass Index View")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Space.m)
+                .padding(.vertical, Space.s)
+                Divider()
+
+                List(tab.indexes, id: \.name) { index in
+                    IndexCardView(node: index)
+                }
+                .listStyle(.inset)
+            }
+        }
+    }
+}
+
+private struct IndexCardView: View {
+    let node: BrowseNode
+    @State private var copied = false
+
+    private var details: [String] {
+        guard let d = node.detail, !d.isEmpty else { return [] }
+        return d.components(separatedBy: " · ")
+    }
+
+    private var keySpec: String {
+        details.first ?? ""
+    }
+
+    private var propertyBadges: [String] {
+        Array(details.dropFirst())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "number.square.fill")
+                    .foregroundStyle(.blue)
+                    .font(.title3)
+
+                Text(node.name)
+                    .font(.system(.body, design: .monospaced).weight(.semibold))
+
+                if node.name == "_id_" {
+                    Pill(text: "DEFAULT", color: .secondary)
+                }
+
+                ForEach(propertyBadges, id: \.self) { badge in
+                    let lower = badge.lowercased()
+                    if lower.contains("unique") {
+                        Pill(text: "UNIQUE", color: .purple)
+                    } else if lower.contains("sparse") {
+                        Pill(text: "SPARSE", color: .teal)
+                    } else if lower.contains("expire") || lower.contains("ttl") {
+                        Pill(text: badge.uppercased(), color: .orange)
+                    } else {
+                        Pill(text: badge.uppercased(), color: .secondary)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(keySpec.isEmpty ? node.name : keySpec, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copied = false
+                    }
+                } label: {
+                    if copied {
+                        Label("Copied", systemImage: "checkmark")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+
+            if !keySpec.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Fields:")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text(keySpec)
+                        .font(.system(.caption, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .cornerRadius(4)
+                }
+            }
+        }
+        .padding(.vertical, 6)
     }
 }

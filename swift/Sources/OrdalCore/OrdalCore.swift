@@ -637,6 +637,8 @@ public protocol ConnectionManagerProtocol: AnyObject, Sendable {
     
     func addHistory(id: String, entry: HistoryEntry) throws 
     
+    func clearHistory(id: String) throws 
+    
     /**
      * Removes the connection, its password and its history.
      */
@@ -752,6 +754,15 @@ open func addHistory(id: String, entry: HistoryEntry)throws   {try rustCallWithE
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterTypeHistoryEntry_lower(entry),uniffiCallStatus
+    )
+}
+}
+    
+open func clearHistory(id: String)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
+        uniffiCallStatus in
+    uniffi_ordal_core_fn_method_connectionmanager_clear_history(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
     )
 }
 }
@@ -4806,6 +4817,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ordal_core_checksum_method_connectionmanager_add_history() != 14707) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ordal_core_checksum_method_connectionmanager_clear_history() != 47012) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ordal_core_checksum_method_connectionmanager_delete() != 56272) {

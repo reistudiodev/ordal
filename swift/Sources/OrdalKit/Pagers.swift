@@ -77,8 +77,8 @@ public final class CursorPager: GridDataSource {
     public var elapsedMs: UInt64 { cursor.elapsedMs() }
     public var rowsAffected: UInt64? { cursor.rowsAffected() }
 
-    /// Sorting needs every row; a truncated or still-loading result can't be sorted honestly.
-    public var canSort: Bool { isDone && !isTruncated && error == nil }
+    /// Sorting can sort any loaded rows in memory.
+    public var canSort: Bool { !rows.isEmpty && error == nil }
 
     /// Loads columns and the first pages. Returns when the first page is in
     /// (or the query ended), so callers can show "running" until then.
@@ -120,6 +120,16 @@ public final class CursorPager: GridDataSource {
 
     public func cancel() {
         cursor.cancel()
+    }
+
+    public func exportCSV() -> String {
+        let exportRows = order.map { indices in indices.map { rows[$0] } } ?? rows
+        return DataExporter.csv(columns: columns, rows: exportRows)
+    }
+
+    public func exportJSON(pretty: Bool = true) -> String {
+        let exportRows = order.map { indices in indices.map { rows[$0] } } ?? rows
+        return DataExporter.json(columns: columns, rows: exportRows, pretty: pretty)
     }
 
     private func fill() async {
@@ -199,6 +209,7 @@ public final class TablePager: GridDataSource {
     public private(set) var isLoading = false
     public private(set) var isCounting = false
     public private(set) var error: String?
+    public private(set) var elapsedMs: UInt64?
     public private(set) var version = 0
     /// Staged values by row key and column. They survive page changes.
     public private(set) var staged: [StagedCell: Value] = [:]
@@ -206,7 +217,7 @@ public final class TablePager: GridDataSource {
     private var originals: [StagedCell: Value] = [:]
 
     private var session: Session
-    public let path: [String]
+    public private(set) var path: [String]
     private var cursor: PageCursor = .first
 
     public struct StagedCell: Hashable {
@@ -217,6 +228,10 @@ public final class TablePager: GridDataSource {
     public init(session: Session, path: [String]) {
         self.session = session
         self.path = path
+    }
+
+    public func updatePath(_ newPath: [String]) {
+        self.path = newPath
     }
 
     // MARK: GridDataSource
@@ -351,17 +366,34 @@ public final class TablePager: GridDataSource {
     private func load(_ cursor: PageCursor, number: Int) async {
         isLoading = true
         defer { isLoading = false }
+        let startTime = ContinuousClock.now
         do {
             let spec = sort.map { SortSpec(column: $0.column, descending: $0.descending) }
             let p = try await session.fetchPage(path: path, cursor: cursor, size: UInt32(pageSize), sort: spec)
+            let elapsed = ContinuousClock.now - startTime
+            let ms = elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000
+            elapsedMs = UInt64(max(1, ms))
             page = p
             self.cursor = cursor
             pageNumber = p.hasPrev ? number : 1
             error = nil
         } catch {
+            let elapsed = ContinuousClock.now - startTime
+            let ms = elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000
+            elapsedMs = UInt64(max(1, ms))
             self.error = describe(error)
         }
         version += 1
+    }
+
+    public func exportCSV() -> String {
+        guard let page else { return "" }
+        return DataExporter.csv(columns: page.columns, rows: page.rows)
+    }
+
+    public func exportJSON(pretty: Bool = true) -> String {
+        guard let page else { return "[]" }
+        return DataExporter.json(columns: page.columns, rows: page.rows, pretty: pretty)
     }
 
     // MARK: Editing

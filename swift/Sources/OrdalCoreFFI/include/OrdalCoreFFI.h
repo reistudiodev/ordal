@@ -269,6 +269,11 @@ uint64_t uniffi_ordal_core_fn_constructor_connectionmanager_with_directory(RustB
 void uniffi_ordal_core_fn_method_connectionmanager_add_history(uint64_t ptr, RustBuffer id, RustBuffer entry, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_FN_METHOD_CONNECTIONMANAGER_CLEAR_HISTORY
+#define UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_FN_METHOD_CONNECTIONMANAGER_CLEAR_HISTORY
+void uniffi_ordal_core_fn_method_connectionmanager_clear_history(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_FN_METHOD_CONNECTIONMANAGER_DELETE
 #define UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_FN_METHOD_CONNECTIONMANAGER_DELETE
 void uniffi_ordal_core_fn_method_connectionmanager_delete(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
@@ -731,6 +736,12 @@ uint16_t uniffi_ordal_core_checksum_func_classify_statement(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_CHECKSUM_METHOD_CONNECTIONMANAGER_ADD_HISTORY
 #define UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_CHECKSUM_METHOD_CONNECTIONMANAGER_ADD_HISTORY
 uint16_t uniffi_ordal_core_checksum_method_connectionmanager_add_history(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_CHECKSUM_METHOD_CONNECTIONMANAGER_CLEAR_HISTORY
+#define UNIFFI_FFIDEF_UNIFFI_ORDAL_CORE_CHECKSUM_METHOD_CONNECTIONMANAGER_CLEAR_HISTORY
+uint16_t uniffi_ordal_core_checksum_method_connectionmanager_clear_history(void
     
 );
 #endif

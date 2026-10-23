@@ -360,8 +360,34 @@ impl Driver for MongoDriver {
                 Ok(names.into_iter().map(|n| BrowseNode::branch(n, NodeKind::Collection)).collect())
             }
             [db, coll] => {
-                let names = self.client.database(db).collection::<Document>(coll).list_index_names().await?;
-                Ok(names.into_iter().map(|n| BrowseNode::leaf(n, NodeKind::Index, None)).collect())
+                let coll_ref = self.client.database(db).collection::<Document>(coll);
+                let mut cursor = coll_ref.list_indexes().await?;
+                let mut nodes = Vec::new();
+                while let Some(res) = cursor.next().await {
+                    let index = res?;
+                    let name = index.options.as_ref().and_then(|o| o.name.clone()).unwrap_or_else(|| {
+                        index.keys.iter().map(|(k, v)| format!("{k}_{v}")).collect::<Vec<_>>().join("_")
+                    });
+                    let mut details = Vec::new();
+                    let keys_str = index.keys.iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<_>>().join(", ");
+                    if !keys_str.is_empty() {
+                        details.push(format!("{{{keys_str}}}"));
+                    }
+                    if let Some(opt) = &index.options {
+                        if opt.unique.unwrap_or(false) {
+                            details.push("unique".into());
+                        }
+                        if opt.sparse.unwrap_or(false) {
+                            details.push("sparse".into());
+                        }
+                        if let Some(exp) = opt.expire_after {
+                            details.push(format!("TTL: {}s", exp.as_secs()));
+                        }
+                    }
+                    let detail_str = if details.is_empty() { None } else { Some(details.join(" · ")) };
+                    nodes.push(BrowseNode::leaf(name, NodeKind::Index, detail_str));
+                }
+                Ok(nodes)
             }
             _ => Ok(Vec::new()),
         }

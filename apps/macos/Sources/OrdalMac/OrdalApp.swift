@@ -88,6 +88,9 @@ struct AppCommands: Commands {
             Button("Format") { query?.format() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(query == nil || workspace?.config.kind.isSQL != true)
+            Divider()
+            Button("Clear Query History") { query?.clearHistory() }
+                .disabled(query == nil || query?.history.isEmpty == true)
         }
         CommandGroup(after: .sidebar) {
             Picker("Appearance", selection: Binding(get: { theme }, set: { theme = $0; AppTheme.set(AppTheme(rawValue: $0) ?? .system) })) {

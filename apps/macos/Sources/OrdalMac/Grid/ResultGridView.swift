@@ -59,6 +59,7 @@ struct ResultGridView: NSViewRepresentable {
         private var source: (any GridDataSource)?
         private var shownColumns: [ColumnInfo] = []
         private var shownRows = 0
+        private var shownSort: GridSort?
         private static let cellID = NSUserInterfaceItemIdentifier("cell")
 
         init(_ parent: ResultGridView) { self.parent = parent }
@@ -70,20 +71,27 @@ struct ResultGridView: NSViewRepresentable {
             if !sameSource || new.columns != shownColumns {
                 rebuildColumns(new.columns)
                 shownRows = new.rowCount
+                shownSort = new.sort
                 table.reloadData()
                 showSort(new.sort)
                 return
             }
+            let sortChanged = shownSort != new.sort
+            shownSort = new.sort
             showSort(new.sort)
             if new.rowCount != shownRows {
                 shownRows = new.rowCount
                 table.noteNumberOfRowsChanged()
             }
-            // Rows that arrived while they were on screen.
-            let visible = table.rows(in: table.visibleRect)
-            if visible.length > 0, table.numberOfColumns > 0 {
-                table.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
-                                 columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+            if sortChanged {
+                table.reloadData()
+            } else {
+                // Rows that arrived while they were on screen.
+                let visible = table.rows(in: table.visibleRect)
+                if visible.length > 0, table.numberOfColumns > 0 {
+                    table.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
+                                     columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+                }
             }
         }
 
@@ -102,6 +110,7 @@ struct ResultGridView: NSViewRepresentable {
                 let index = Int(tc.identifier.rawValue) ?? -1
                 return index < shownColumns.count && shownColumns[index].name == sort?.column
             }
+            table.headerView?.needsDisplay = true
         }
 
         func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
@@ -120,6 +129,9 @@ struct ResultGridView: NSViewRepresentable {
                 tc.minWidth = 48
                 tc.width = Self.width(for: col)
                 tc.headerCell.alignment = col.kind.isNumeric ? .right : .left
+                if parent.onSortColumn != nil {
+                    tc.sortDescriptorPrototype = NSSortDescriptor(key: col.name, ascending: true)
+                }
                 table.addTableColumn(tc)
             }
         }

@@ -132,4 +132,8 @@ impl ConnectionManager {
     pub fn add_history(&self, id: String, entry: HistoryEntry) -> Result<()> {
         self.history.add(&id, &entry)
     }
+
+    pub fn clear_history(&self, id: String) -> Result<()> {
+        self.history.clear(&id)
+    }
 }
