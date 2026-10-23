@@ -100,12 +100,13 @@ struct TableTabView: View {
 
             switch tab.segment {
             case .data: data
-            case .structure: structure
-            case .indexes: indexesView
-            case .ddl: ddl
+            case .structure: structure.frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .indexes: indexesView.frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .ddl: ddl.frame(maxWidth: .infinity, maxHeight: .infinity)
             case .query: QueryTabView(tab: tab.query, workspace: workspace)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $reviewing) {
             ReviewChangesSheet(pager: tab.pager, config: workspace.config) { reviewing = false }
         }
@@ -205,6 +206,7 @@ struct TableTabView: View {
     private var structure: some View {
         if let error = tab.structureError {
             ContentUnavailableView("Could not load structure", systemImage: "exclamationmark.triangle", description: Text(error))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.config.kind.isSQL {
             Table(tab.structure.map(StructureRow.init)) {
                 TableColumn("Name") { Text($0.name).font(.body.monospaced()) }
@@ -395,12 +397,14 @@ extension TableTabView {
     fileprivate var indexesView: some View {
         if let error = tab.structureError {
             ContentUnavailableView("Could not load indexes", systemImage: "exclamationmark.triangle", description: Text(error))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if tab.indexes.isEmpty {
             ContentUnavailableView {
                 Label("No Indexes", systemImage: "text.magnifyingglass")
             } description: {
                 Text("This collection or table has no secondary indexes.")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {

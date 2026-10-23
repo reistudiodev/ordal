@@ -23,7 +23,7 @@ struct WorkspaceView: View {
                 TabBar(workspace: workspace)
                 Divider()
                 content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 Divider()
                 StatusBar(workspace: workspace)
             }
@@ -81,6 +81,7 @@ struct WorkspaceView: View {
             } actions: {
                 Button("New Query") { workspace.newQueryTab() }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
