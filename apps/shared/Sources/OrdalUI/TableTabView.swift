@@ -69,10 +69,13 @@ public struct TableTabView: View {
                 Task {
                     isRefreshing = true
                     container.notifyUpdate()
-                    await tab.pager.refresh()
-                    await tab.loadStructure()
-                    isRefreshing = false
-                    container.notifyUpdate()
+                    defer {
+                        isRefreshing = false
+                        container.notifyUpdate()
+                    }
+                    async let refreshTask: () = tab.pager.refresh()
+                    async let structTask: () = tab.loadStructure()
+                    _ = await (refreshTask, structTask)
                 }
             }
             .disabled(isRefreshing || tab.pager.isLoading)
@@ -90,6 +93,7 @@ public struct TableTabView: View {
                 container: container,
                 tab: tab,
                 workspace: workspace,
+                isRefreshing: isRefreshing,
                 onShowReview: { showReviewDialog = true }
             )
         case .structure:
@@ -129,6 +133,7 @@ private struct TableDataView: View {
     let container: AppStateContainer
     let tab: TableTabModel
     let workspace: WorkspaceModel
+    var isRefreshing: Bool = false
     let onShowReview: () -> Void
 
     @State private var docMode: DocumentViewMode = .documents
@@ -297,7 +302,7 @@ private struct TableDataView: View {
                 #endif
             }
 
-            if pager.isLoading {
+            if pager.isLoading || isRefreshing {
                 Text("Loading...")
                     .font(.caption)
                     .foregroundColor(Color.hex(0x007ACC))
