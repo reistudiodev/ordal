@@ -74,9 +74,10 @@ struct TableTabView: View {
                     Button {
                         Task {
                             isReloading = true
-                            await tab.pager.refresh()
-                            await tab.loadStructure()
-                            isReloading = false
+                            defer { isReloading = false }
+                            async let refreshTask: () = tab.pager.refresh()
+                            async let structTask: () = tab.loadStructure()
+                            _ = await (refreshTask, structTask)
                         }
                     } label: {
                         if isReloading || tab.pager.isLoading {
@@ -153,7 +154,7 @@ struct TableTabView: View {
                 )
             }
             Divider()
-            PaginationBar(pager: pager)
+            PaginationBar(pager: pager, isReloading: isReloading)
         }
         .overlay(alignment: .top) {
             if isReloading || pager.isLoading {
@@ -265,6 +266,7 @@ struct TableTabView: View {
 /// |< < Page 3 of ~10,000 > >|, the row range, page size and an exact count.
 private struct PaginationBar: View {
     let pager: TablePager
+    var isReloading: Bool = false
     @State private var jump = ""
 
     var body: some View {
@@ -300,7 +302,7 @@ private struct PaginationBar: View {
                       : "This relation has no key, so every page uses an offset.")
 
             Divider().frame(height: 14)
-            if pager.isLoading {
+            if pager.isLoading || isReloading {
                 HStack(spacing: 4) {
                     ProgressView().controlSize(.small)
                     Text("Loading…")

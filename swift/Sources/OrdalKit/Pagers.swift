@@ -343,9 +343,18 @@ public final class TablePager: GridDataSource {
 
     /// Re-reads metadata and returns to the first page (after schema changes).
     public func refresh() async {
-        meta = try? await session.tableMeta(path: path)
-        await load(.first, number: 1)
-        await refreshCount(exact: count?.exact ?? false)
+        isLoading = true
+        defer { isLoading = false }
+        async let metaTask: TableMeta? = try? await session.tableMeta(path: path)
+        async let loadTask: () = loadPage(.first, number: 1)
+
+        let (newMeta, _) = await (metaTask, loadTask)
+        if let newMeta {
+            self.meta = newMeta
+        }
+        Task {
+            await refreshCount(exact: count?.exact ?? false)
+        }
     }
 
     public func refreshCount(exact: Bool) async {
@@ -366,6 +375,10 @@ public final class TablePager: GridDataSource {
     private func load(_ cursor: PageCursor, number: Int) async {
         isLoading = true
         defer { isLoading = false }
+        await loadPage(cursor, number: number)
+    }
+
+    private func loadPage(_ cursor: PageCursor, number: Int) async {
         let startTime = ContinuousClock.now
         do {
             let spec = sort.map { SortSpec(column: $0.column, descending: $0.descending) }
